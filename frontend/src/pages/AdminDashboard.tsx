@@ -1,6 +1,7 @@
 /**
- * MediSafe Clinic - 메인 대시보드
- * 종합 보안 점수, 모듈 요약, 최근 이벤트를 표시합니다.
+ * MediSafe Clinic - 원장(Admin) 전용 대시보드
+ * 병원 전체 보안 점수, 모든 엔드포인트, 전체 로그, 컴플라이언스 현황을 표시합니다.
+ * staff 계정은 이 화면에 접근할 수 없습니다.
  */
 import { useState, useEffect } from 'react'
 import { Shield, Monitor, FileText, ClipboardCheck, AlertTriangle, CheckCircle, XCircle, Clock, TrendingUp } from 'lucide-react'
