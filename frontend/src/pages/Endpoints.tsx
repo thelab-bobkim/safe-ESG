@@ -3,7 +3,7 @@
  * 병원 내 PC 보안 상태 관리
  */
 import { useState, useEffect } from 'react'
-import { Monitor, Plus, CheckCircle, XCircle, AlertTriangle, Wifi, WifiOff, RefreshCw } from 'lucide-react'
+import { Monitor, Plus, CheckCircle, XCircle, AlertTriangle, Wifi, WifiOff, RefreshCw, Download, Info } from 'lucide-react'
 import { endpointApi } from '../api/client'
 
 interface Endpoint {
@@ -184,6 +184,25 @@ export default function Endpoints() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 에이전트 설치 안내 배너 */}
+      {endpoints.length > 0 && endpoints.every(e => e.status === 'offline') && (
+        <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+          <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="font-semibold text-blue-800 text-sm">사내 PC에 에이전트를 설치하세요</p>
+            <p className="text-xs text-blue-600 mt-1">
+              PC에 에이전트를 설치하면 보안 상태(백신·암호화·패치·방화벽)가 자동으로 수집됩니다.
+            </p>
+          </div>
+          <a
+            href="/api/v1/agent/download"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 flex-shrink-0"
+          >
+            <Download className="w-3.5 h-3.5" /> 에이전트 다운로드
+          </a>
         </div>
       )}
 

@@ -194,6 +194,66 @@ async def report_usb_event(data: USBEventReport, db: Session = Depends(get_db)):
     return {"status": "recorded"}
 
 
+@router.patch("/{endpoint_id}/heartbeat")
+async def jwt_heartbeat(
+    endpoint_id: int,
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    JWT 인증 기반 heartbeat (에이전트 v0.1용)
+    원장 JWT 토큰으로 본인 테넌트 엔드포인트의 상태를 업데이트합니다.
+    """
+    ep = _get_endpoint_or_404(db, endpoint_id, current_user.tenant_id)
+
+    # 보안 상태 업데이트
+    ep.last_seen_at = datetime.utcnow()
+    ep.status = EndpointStatus.ONLINE
+    for field in ["disk_encrypted", "antivirus_installed", "os_patched",
+                  "firewall_enabled", "screen_lock_enabled", "ip_address", "os_version"]:
+        if data.get(field) is not None:
+            setattr(ep, field, data[field])
+    if data.get("extra_data"):
+        ep.score_details = data["extra_data"]
+
+    # 보안 점수 재계산
+    score_data = calculate_endpoint_score(ep)
+    ep.security_score = score_data["total"]
+
+    db.commit()
+    return {
+        "status": "ok",
+        "endpoint_id": ep.id,
+        "hostname": ep.hostname,
+        "security_score": score_data["total"],
+        "grade": score_data.get("grade", "?"),
+    }
+
+
+@router.post("/{endpoint_id}/usb-events")
+async def report_usb_event_jwt(
+    endpoint_id: int,
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """JWT 인증 기반 USB 이벤트 기록 (에이전트 v0.1용)"""
+    ep = _get_endpoint_or_404(db, endpoint_id, current_user.tenant_id)
+
+    event = USBEvent(
+        tenant_id=ep.tenant_id,
+        endpoint_id=ep.id,
+        event_type=data.get("action", "connected"),
+        device_name=data.get("device_name", "Unknown"),
+        device_id=data.get("device_id", ""),
+        blocked=data.get("blocked", False),
+    )
+    db.add(event)
+    db.commit()
+    return {"status": "recorded", "endpoint_id": ep.id}
+
+
 @router.delete("/{endpoint_id}")
 async def deactivate_endpoint(
     endpoint_id: int,
