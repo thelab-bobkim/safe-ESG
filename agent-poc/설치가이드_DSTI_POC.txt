@@ -1,0 +1,78 @@
+════════════════════════════════════════════════════════
+  MediSafe Clinic - DSTI 사무실 POC 설치 가이드
+  서버: https://jntubkwn.gensparkclaw.com
+════════════════════════════════════════════════════════
+
+【 준비물 】
+  ✅ Python 3.11 이상 설치 필요
+     → https://www.python.org/downloads/
+     → 설치 시 "Add Python to PATH" 반드시 체크!
+
+  ✅ 인터넷 연결 (HTTPS 443포트)
+
+
+【 설치 방법 】
+
+  방법 1 (권장): 배치 파일 실행
+  ─────────────────────────────
+  1. "MediSafe_Agent_DSTI.bat" 파일을 더블클릭
+  2. Python 미설치 안내가 뜨면 → python.org에서 설치
+  3. 설치 완료 후 자동으로 서버 연결 테스트
+  4. "Y" 입력 → 상시 모니터링 시작
+
+  방법 2: 명령 프롬프트에서 직접 실행
+  ─────────────────────────────────────
+  1. 이 폴더에서 마우스 우클릭 → "터미널에서 열기"
+  2. 아래 명령어 순서대로 실행:
+
+     pip install requests psutil schedule colorama
+
+     python agent.py --test     ← 1회 테스트
+     python agent.py            ← 상시 모니터링
+
+
+【 대시보드 접속 】
+
+  URL: https://jntubkwn.gensparkclaw.com
+
+  원장(형태님):  htkim@dsti.co.kr  /  Dsti@Admin1!
+
+
+【 에이전트가 수집하는 정보 】
+
+  ✅ 수집하는 것:
+     - 디스크 암호화(BitLocker) 활성화 여부
+     - 백신 설치 및 동작 여부 (Windows Defender)
+     - OS 보안 패치 적용 여부
+     - Windows 방화벽 활성화 여부
+     - 화면 잠금 설정 여부
+     - USB 장치 연결/해제 이벤트
+     - CPU/메모리/디스크 사용률 (시스템 성능)
+
+  ❌ 수집하지 않는 것:
+     - 파일 내용, 문서, 이미지
+     - 이메일, 메시지
+     - 환자 정보, 개인정보
+     - 웹 브라우저 기록
+     - 키보드 입력
+
+
+【 문제 해결 】
+
+  ▸ "서버 연결 실패"
+    → 방화벽에서 443 포트 허용 확인
+    → 인터넷 연결 확인
+
+  ▸ "Python을 찾을 수 없습니다"
+    → python.org에서 재설치 + PATH 체크
+
+  ▸ "로그인 실패"
+    → config.py의 이메일/비밀번호 확인
+
+
+【 지원 】
+
+  문의: htkim@dsti.co.kr
+  대시보드: https://jntubkwn.gensparkclaw.com
+
+════════════════════════════════════════════════════════
