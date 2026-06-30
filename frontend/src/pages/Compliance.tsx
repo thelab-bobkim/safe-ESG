@@ -81,7 +81,7 @@ export default function Compliance() {
   const handleCreateCheck = async () => {
     setCreating(true)
     try {
-      const res = await complianceApi.createCheck()
+      const res = await complianceApi.createCheck(selectedEndpointId ?? undefined)
       await loadChecks()
       loadCheckDetail(res.data)
     } catch (err: any) {
@@ -160,8 +160,10 @@ export default function Compliance() {
                 activeCheck?.id === check.id ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:border-blue-300'
               }`}
             >
-              {new Date(check.checked_at!).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
-              {' '}({check.total_score.toFixed(0)}점)
+              <div>{new Date(check.checked_at!).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })} ({check.total_score.toFixed(0)}점)</div>
+              {check.checked_by_name && (
+                <div className="text-xs opacity-70 truncate max-w-32">{check.checked_by_name}</div>
+              )}
             </button>
           ))}
         </div>

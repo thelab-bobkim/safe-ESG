@@ -55,12 +55,13 @@ async def list_checks(
 
 @router.post("/checks", status_code=201)
 async def create_check(
+    endpoint_id: Optional[int] = None,
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
     """
     새 컴플라이언스 점검을 시작합니다.
-    모든 체크리스트 항목이 'pending' 상태로 생성됩니다.
+    endpoint_id 지정 시 해당 PC 단독 판정, 미지정 시 전체 PC 평균 판정
     """
     # 모든 체크리스트 항목 가져오기
     items = db.query(ComplianceItem).order_by(ComplianceItem.order_num).all()
@@ -78,11 +79,18 @@ async def create_check(
 
     # ── 에이전트 데이터 수집 ──────────────────────────────
     from app.models.endpoint import Endpoint
-    endpoints = db.query(Endpoint).filter(
+    ep_query = db.query(Endpoint).filter(
         Endpoint.tenant_id == current_user.tenant_id,
         Endpoint.is_active == True,
-    ).all()
+    )
+    # 특정 PC 선택 시 해당 PC만, 미선택 시 전체
+    if endpoint_id:
+        ep_query = ep_query.filter(Endpoint.id == endpoint_id)
+    endpoints = ep_query.all()
     total_eps = len(endpoints)
+    # 점검 대상 PC명 저장
+    target_name = endpoints[0].hostname if len(endpoints) == 1 else f"전체 {total_eps}대"
+    check.checked_by_name = f"{current_user.name} ({target_name})"
 
     def ratio(field):
         if not endpoints: return None

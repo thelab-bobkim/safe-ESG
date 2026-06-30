@@ -82,7 +82,9 @@ export const complianceApi = {
   listItems: (regulation?: string) =>
     api.get('/compliance/items', { params: regulation ? { regulation } : {} }),
   listChecks: () => api.get('/compliance/checks'),
-  createCheck: () => api.post('/compliance/checks'),
+  createCheck: (endpointId?: number) => api.post('/compliance/checks', null, {
+    params: endpointId ? { endpoint_id: endpointId } : {}
+  }),
   getCheckDetail: (id: number) => api.get(`/compliance/checks/${id}`),
   updateResults: (checkId: number, updates: Array<{
     item_id: number; status: string; evidence?: string; note?: string
