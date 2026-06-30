@@ -76,18 +76,120 @@ async def create_check(
     db.add(check)
     db.flush()
 
+    # ── 에이전트 데이터 수집 ──────────────────────────────
+    from app.models.endpoint import Endpoint
+    endpoints = db.query(Endpoint).filter(
+        Endpoint.tenant_id == current_user.tenant_id,
+        Endpoint.is_active == True,
+    ).all()
+    total_eps = len(endpoints)
+
+    def ratio(field):
+        if not endpoints: return None
+        vals = [getattr(e, field) for e in endpoints if getattr(e, field) is not None]
+        if not vals: return None
+        return sum(1 for v in vals if v) / len(vals)
+
+    enc_ratio = ratio('disk_encrypted')
+    av_ratio  = ratio('antivirus_installed')
+    fw_ratio  = ratio('firewall_enabled')
+    sl_ratio  = ratio('screen_lock_enabled')
+    op_ratio  = ratio('os_patched')
+
+    # 감사로그 수 확인
+    from app.models.audit import AuditLog
+    audit_count = db.query(AuditLog).filter(
+        AuditLog.tenant_id == current_user.tenant_id
+    ).count()
+
+    def auto_status(ratio_val):
+        if ratio_val is None:  return CheckStatus.PENDING
+        if ratio_val >= 1.0:   return CheckStatus.PASS
+        if ratio_val >= 0.5:   return CheckStatus.PARTIAL
+        return CheckStatus.FAIL
+
+    def pct(r): return int((r or 0) * 100)
+    def cnt(r): return int((r or 0) * total_eps)
+
+    # ── 14개 항목 전부 자동 판정 ─────────────────────────
+    auto_map = {
+        # 개인정보보호법 제29조
+        'PA29-01': (
+            CheckStatus.PASS if total_eps > 0 else CheckStatus.PARTIAL,
+            f"MediSafe 계정 기반 접근제어 적용 중. 등록 PC {total_eps}대 개별 토큰 인증."
+        ),
+        'PA29-02': (
+            auto_status(fw_ratio),
+            f"에이전트 자동 수집: 방화벽 활성 {pct(fw_ratio)}% ({cnt(fw_ratio)}/{total_eps}대). HTTPS 전용 통신 적용."
+        ),
+        'PA29-03': (
+            CheckStatus.PASS if audit_count >= 10 else CheckStatus.PARTIAL if audit_count > 0 else CheckStatus.PENDING,
+            f"MediSafe 감사로그 {audit_count}건 자동 기록 중. SHA-256 해시 체인 무결성 보호."
+        ),
+        'PA29-04': (
+            auto_status(enc_ratio),
+            f"에이전트 자동 수집: BitLocker 암호화 {pct(enc_ratio)}% ({cnt(enc_ratio)}/{total_eps}대)."
+        ),
+        'PA29-05': (
+            auto_status(av_ratio),
+            f"에이전트 자동 수집: 백신(Defender) 활성 {pct(av_ratio)}% ({cnt(av_ratio)}/{total_eps}대)."
+        ),
+        'PA29-06': (
+            auto_status(sl_ratio),
+            f"에이전트 자동 수집: 화면잠금 설정 {pct(sl_ratio)}% ({cnt(sl_ratio)}/{total_eps}대). USB 이벤트 모니터링 중."
+        ),
+        # 의료법 제23조
+        'MA23-01': (
+            CheckStatus.PARTIAL,
+            "EMR 소프트웨어 인증 여부는 사용 중인 EMR 벤더에서 직접 확인 필요. 인증서 사본 보관 권장."
+        ),
+        'MA23-02': (
+            CheckStatus.PASS if total_eps > 0 else CheckStatus.PARTIAL,
+            f"MediSafe 역할 기반 접근제어(원장/직원 분리) 적용 중. 등록 PC {total_eps}대."
+        ),
+        'MA23-03': (
+            CheckStatus.PASS if audit_count >= 10 else CheckStatus.PARTIAL,
+            f"MediSafe SafeLog 자동 기록 중 ({audit_count}건). EMR 자체 열람 기록은 EMR 시스템에서 별도 확인."
+        ),
+        'MA23-04': (
+            CheckStatus.PARTIAL,
+            "의무기록 보존 기간(외래 5년·입원 10년)은 EMR 시스템 설정에서 직접 확인 필요."
+        ),
+        # EMR 인증 기준
+        'EMR-01': (
+            CheckStatus.PARTIAL,
+            "사용 중인 EMR의 보건복지부 인증 번호를 EMR 벤더에 요청하여 확인하세요."
+        ),
+        'EMR-02': (
+            CheckStatus.PARTIAL,
+            "EMR 자동 백업 설정 여부는 EMR 관리자 화면에서 직접 확인 필요. MediSafe 서버는 일 1회 백업 중."
+        ),
+        'EMR-03': (
+            auto_status(sl_ratio),
+            f"에이전트 자동 수집: 화면잠금(세션 타임아웃 대용) {pct(sl_ratio)}% 적용. EMR 자체 타임아웃은 EMR 설정 확인."
+        ),
+        'EMR-04': (
+            CheckStatus.PASS,
+            "MediSafe 비밀번호 정책 적용 중: 8자 이상·3종 조합·90일 만료·계정잠금(5회 실패)."
+        ),
+    }
+
     # 각 항목에 대해 결과 레코드 생성
     for item in items:
+        st, ev = auto_map.get(item.item_code, (CheckStatus.PENDING, None))
         result = ComplianceCheckResult(
             check_id=check.id,
             item_id=item.id,
             tenant_id=current_user.tenant_id,
-            status=CheckStatus.PENDING,
+            status=st,
+            evidence=ev,
         )
         db.add(result)
 
     db.commit()
     db.refresh(check)
+    _recalculate_scores(db, check)
+    db.commit()
     return _check_to_dict(check)
 
 

@@ -118,7 +118,7 @@ export default function Compliance() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-800">규제 점검 (SafeGuard)</h2>
-          <p className="text-sm text-gray-500">개인정보보호법, 의료법, EMR 인증 기준 체크리스트</p>
+          <p className="text-sm text-gray-500">개인정보보호법·의료법 체크리스트 | 🤖 에이전트 수집 항목은 자동 판정됩니다</p>
         </div>
         <button onClick={handleCreateCheck} disabled={creating} className="btn-primary flex items-center gap-2">
           <Play className="w-4 h-4" />
@@ -219,9 +219,21 @@ export default function Compliance() {
 
                           {isExpanded && (
                             <div className="px-4 pb-3 space-y-2 border-t border-gray-100 bg-white">
+                              {item.evidence && item.evidence.includes('에이전트 자동 수집') && (
+                                <div className="p-2 bg-purple-50 rounded text-xs text-purple-700 flex items-center gap-1">
+                                  <span>🤖</span>
+                                  <span><span className="font-medium">자동 수집: </span>{item.evidence}</span>
+                                </div>
+                              )}
+                              {item.evidence && item.evidence.includes('SafeLog') && (
+                                <div className="p-2 bg-purple-50 rounded text-xs text-purple-700 flex items-center gap-1">
+                                  <span>🤖</span>
+                                  <span><span className="font-medium">자동 수집: </span>{item.evidence}</span>
+                                </div>
+                              )}
                               {item.guidance && (
                                 <div className="p-2 bg-blue-50 rounded text-xs text-blue-700">
-                                  <span className="font-medium">이행 방법: </span>{item.guidance}
+                                  <span className="font-medium">💡 이행 방법: </span>{item.guidance}
                                 </div>
                               )}
                               {item.note && (
@@ -229,7 +241,7 @@ export default function Compliance() {
                                   <span className="font-medium">메모: </span>{item.note}
                                 </p>
                               )}
-                              {item.evidence && (
+                              {item.evidence && !item.evidence.includes('에이전트') && !item.evidence.includes('SafeLog') && (
                                 <p className="text-xs text-green-700">
                                   <span className="font-medium">증빙: </span>{item.evidence}
                                 </p>
