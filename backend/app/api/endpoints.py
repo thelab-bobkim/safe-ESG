@@ -41,6 +41,8 @@ class EndpointStatusUpdate(BaseModel):
     screen_lock_enabled: Optional[bool] = None
     agent_version: Optional[str] = None
     ip_address: Optional[str] = None
+    pc_name: Optional[str] = None    # 설치 시 입력한 PC 표시명
+    location: Optional[str] = None  # 설치 시 입력한 위치
 
 
 class USBEventReport(BaseModel):
@@ -290,6 +292,9 @@ async def agent_heartbeat(
     if data.screen_lock_enabled is not None: ep.screen_lock_enabled = data.screen_lock_enabled
     if data.agent_version: ep.agent_version = data.agent_version
     if data.ip_address: ep.ip_address = data.ip_address
+    # PC명/위치 업데이트 (설치 마법사에서 입력한 값이 heartbeat로 전달됨)
+    if getattr(data, 'pc_name', None): ep.hostname = data.pc_name
+    if getattr(data, 'location', None): ep.location = data.location
 
     # 보안 점수 재계산
     score_data = calculate_endpoint_score(ep)
