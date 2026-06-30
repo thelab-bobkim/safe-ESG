@@ -144,22 +144,31 @@ export default function Compliance() {
         </div>
         <div className="flex items-center gap-2">
           {/* PC 선택 */}
-          <select
-            value={selectedEndpointId ?? ''}
-            onChange={e => setSelectedEndpointId(Number(e.target.value))}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-blue-50 font-medium"
-          >
-            {endpoints.map(ep => (
-              <option key={ep.id} value={ep.id}>
-                🖥 {ep.hostname}{ep.location ? ` (${ep.location})` : ''}
-                {ep.status === 'online' ? ' ●' : ' ○'}
-              </option>
-            ))}
-          </select>
-          <button onClick={handleCreateCheck} disabled={creating} className="btn-primary flex items-center gap-2">
-            <Play className="w-4 h-4" />
-            {creating ? '생성 중...' : '새 점검 시작'}
-          </button>
+          <div className="flex flex-col">
+            <label className="text-xs text-gray-500 mb-0.5 pl-1">점검 대상 PC</label>
+            <select
+              value={selectedEndpointId ?? ''}
+              onChange={e => {
+                const val = e.target.value
+                setSelectedEndpointId(val ? Number(val) : null)
+              }}
+              className="border-2 border-blue-400 rounded-lg px-3 py-2 text-sm bg-blue-50 font-semibold min-w-48"
+            >
+              <option value="">전체 PC 평균</option>
+              {endpoints.map(ep => (
+                <option key={ep.id} value={ep.id}>
+                  {ep.status === 'online' ? '🟢' : '⚫'} {ep.hostname}{ep.location ? ` (${ep.location})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col">
+            <label className="text-xs text-gray-500 mb-0.5 pl-1">&nbsp;</label>
+            <button onClick={handleCreateCheck} disabled={creating} className="btn-primary flex items-center gap-2">
+              <Play className="w-4 h-4" />
+              {creating ? '생성 중...' : '새 점검 시작'}
+            </button>
+          </div>
         </div>
       </div>
 
