@@ -47,6 +47,9 @@ class Tenant(Base):
     max_endpoints = Column(Integer, default=10, comment="최대 등록 가능 엔드포인트 수")
     is_active = Column(Boolean, default=True)
 
+    # 에이전트 자동 등록 코드 (병원별 고유 코드, 설치 시 입력)
+    enroll_code = Column(String(20), unique=True, nullable=True, comment="에이전트 등록 코드")
+
     # 타임스탬프
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

@@ -12,6 +12,7 @@ import secrets
 from app.core.database import get_db
 from app.core.security import get_current_user, get_current_admin
 from app.models.endpoint import Endpoint, EndpointStatus, OSType, USBEvent
+from app.models.tenant import Tenant
 from app.models.user import User
 from app.services.security_score import calculate_endpoint_score
 from app.services import log_service
@@ -49,6 +50,122 @@ class USBEventReport(BaseModel):
     device_name: Optional[str] = None
     device_id: Optional[str] = None
     blocked: bool = False
+
+
+class AgentEnrollRequest(BaseModel):
+    """에이전트 자동 등록 요청 - 병원 등록코드 기반"""
+    enroll_code: str           # 병원 고유 등록 코드 (예: DST-531105)
+    hostname: str              # PC 이름
+    ip_address: Optional[str] = None
+    os_type: str = "windows"
+    os_version: Optional[str] = None
+    location: Optional[str] = None
+
+
+@router.post("/agent/enroll", status_code=201)
+async def agent_enroll(
+    data: AgentEnrollRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    에이전트 자동 등록 API (비밀번호 불필요)
+    병원 등록코드(enroll_code)만으로 PC를 자동 등록하고 에이전트 토큰을 발급합니다.
+    """
+    # 등록 코드로 테넌트 조회
+    tenant = db.query(Tenant).filter(
+        Tenant.enroll_code == data.enroll_code.upper().strip(),
+        Tenant.is_active == True,
+    ).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="등록 코드가 올바르지 않습니다. MediSafe 대시보드에서 등록 코드를 확인하세요."
+        )
+
+    # 최대 PC 수 확인
+    current_count = db.query(Endpoint).filter(
+        Endpoint.tenant_id == tenant.id,
+        Endpoint.is_active == True,
+    ).count()
+    if current_count >= tenant.max_endpoints:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"최대 등록 PC 수({tenant.max_endpoints}대)를 초과했습니다. 플랜을 업그레이드하세요."
+        )
+
+    # 같은 hostname이 이미 있으면 재사용
+    existing = db.query(Endpoint).filter(
+        Endpoint.tenant_id == tenant.id,
+        Endpoint.hostname == data.hostname,
+        Endpoint.is_active == True,
+    ).first()
+    if existing:
+        return {
+            "endpoint_id":  existing.id,
+            "agent_token":  existing.agent_token,
+            "hostname":     existing.hostname,
+            "tenant_name":  tenant.name,
+            "message":      "기존 등록 PC 재사용",
+        }
+
+    # 새 에이전트 토큰 발급 + PC 등록
+    agent_token = secrets.token_urlsafe(32)
+    os_type_val = data.os_type.lower()
+    ep = Endpoint(
+        tenant_id   = tenant.id,
+        hostname    = data.hostname,
+        ip_address  = data.ip_address,
+        os_type     = os_type_val,
+        os_version  = data.os_version,
+        location    = data.location or f"{tenant.name} PC",
+        agent_token = agent_token,
+        status      = EndpointStatus.OFFLINE,
+    )
+    db.add(ep)
+
+    # SafeLog 기록
+    log_service.record(db,
+        tenant_id        = tenant.id,
+        event_type       = log_service.LogEventType.ADMIN_ACTION,
+        severity         = log_service.LogSeverity.INFO,
+        ip_address       = data.ip_address,
+        endpoint_hostname= data.hostname,
+        resource         = f"PC: {data.hostname}",
+        action           = "에이전트 자동 등록",
+        result           = "success",
+        description      = f"새 PC 자동 등록 — {data.hostname} ({data.os_type}) | 병원: {tenant.name}",
+    )
+
+    db.commit()
+    db.refresh(ep)
+
+    return {
+        "endpoint_id":  ep.id,
+        "agent_token":  agent_token,
+        "hostname":     ep.hostname,
+        "tenant_name":  tenant.name,
+        "message":      "등록 완료",
+    }
+
+
+@router.get("/agent/enroll-info")
+async def get_enroll_info(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """현재 병원의 에이전트 등록 코드를 반환합니다."""
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="병원 정보를 찾을 수 없습니다.")
+    return {
+        "tenant_name": tenant.name,
+        "enroll_code": tenant.enroll_code,
+        "max_endpoints": tenant.max_endpoints,
+        "current_endpoints": db.query(Endpoint).filter(
+            Endpoint.tenant_id == tenant.id,
+            Endpoint.is_active == True,
+        ).count(),
+    }
 
 
 @router.get("/")
