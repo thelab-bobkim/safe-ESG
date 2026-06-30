@@ -12,6 +12,7 @@ import Endpoints from './pages/Endpoints'
 import Logs from './pages/Logs'
 import Compliance from './pages/Compliance'
 import MyActivity from './pages/MyActivity'
+import { authApi } from './api/client'
 
 export interface UserInfo {
   id: number
@@ -26,12 +27,25 @@ function App() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const stored = localStorage.getItem('user_info')
     const token = localStorage.getItem('access_token')
-    if (stored && token) {
-      setUser(JSON.parse(stored))
+    if (!token) {
+      setLoading(false)
+      return
     }
-    setLoading(false)
+    // 항상 서버 /me로 role 재검증 (localStorage 캐시 무시)
+    authApi.me()
+      .then(res => {
+        const { id, email, name, role, tenant_id } = res.data
+        const userInfo: UserInfo = { id, email, name, role, tenant_id }
+        localStorage.setItem('user_info', JSON.stringify(userInfo))
+        setUser(userInfo)
+      })
+      .catch(() => {
+        // 토큰 만료 or 오류 → 로그아웃
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('user_info')
+      })
+      .finally(() => setLoading(false))
   }, [])
 
   if (loading) {

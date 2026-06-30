@@ -22,14 +22,20 @@ export default function Login({ onLogin }: Props) {
     setError('')
 
     try {
+      // 1단계: 토큰 발급
       const res = await authApi.login(email, password)
-      const { access_token, user_id, user_name, role, tenant_id } = res.data
-
+      const { access_token } = res.data
       localStorage.setItem('access_token', access_token)
-      const userInfo: UserInfo = { id: user_id, email, name: user_name, role, tenant_id }
+
+      // 2단계: /me API로 정확한 사용자 정보(role 포함) 조회
+      const meRes = await authApi.me()
+      const { id, name, role, tenant_id } = meRes.data
+
+      const userInfo: UserInfo = { id, email, name, role, tenant_id }
       localStorage.setItem('user_info', JSON.stringify(userInfo))
       onLogin(userInfo)
     } catch (err: any) {
+      localStorage.removeItem('access_token')
       setError(err.response?.data?.detail || '로그인에 실패했습니다.')
     } finally {
       setLoading(false)
@@ -101,11 +107,11 @@ export default function Login({ onLogin }: Props) {
 
           {/* 테스트 계정 안내 */}
           <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-            <p className="text-xs font-medium text-gray-600 mb-2">🔑 베타 테스트 계정</p>
+            <p className="text-xs font-medium text-gray-600 mb-2">🔑 데모 계정</p>
             <div className="space-y-1 text-xs text-gray-500">
-              <p><span className="font-medium">원장:</span> doctor@yonsei-clinic.kr / Doctor1234!</p>
-              <p><span className="font-medium">직원:</span> staff@yonsei-clinic.kr / Staff1234!</p>
-              <p><span className="font-medium">치과:</span> doctor@seoul-dental.kr / Doctor5678!</p>
+              <p><span className="font-medium">DSTI 원장:</span> htkim@dsti.co.kr / Dsti@Admin1!</p>
+              <p><span className="font-medium">연세의원 원장:</span> doctor@yonsei-clinic.kr / Doctor@Clinic1!</p>
+              <p><span className="font-medium">연세의원 직원:</span> staff@yonsei-clinic.kr / Staff@Clinic2!</p>
             </div>
           </div>
         </div>
