@@ -3,8 +3,8 @@
  * 접속 로그 조회, 필터링, CSV 내보내기
  */
 import { useState, useEffect } from 'react'
-import { Search, Download, Filter, RefreshCw, AlertTriangle, CheckCircle, Info } from 'lucide-react'
-import { logApi } from '../api/client'
+import { Search, Download, Filter, RefreshCw, AlertTriangle, CheckCircle, Info, Monitor } from 'lucide-react'
+import { logApi, endpointApi } from '../api/client'
 
 interface Log {
   id: number; event_type: string; severity: string; user_name: string | null
@@ -32,10 +32,11 @@ export default function Logs() {
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [summary, setSummary] = useState<any>(null)
+  const [endpoints, setEndpoints] = useState<{id:number; hostname:string; location:string|null}[]>([])
 
   // 필터 상태
   const [filters, setFilters] = useState({
-    event_type: '', severity: '', start_date: '', end_date: '', keyword: ''
+    event_type: '', severity: '', start_date: '', end_date: '', keyword: '', endpoint_hostname: ''
   })
 
   const load = (p = page) => {
@@ -46,6 +47,7 @@ export default function Logs() {
     if (filters.start_date) params.start_date = filters.start_date
     if (filters.end_date) params.end_date = filters.end_date
     if (filters.keyword) params.keyword = filters.keyword
+    if (filters.endpoint_hostname) params.endpoint_hostname = filters.endpoint_hostname
 
     logApi.list(params)
       .then(res => {
@@ -58,6 +60,7 @@ export default function Logs() {
 
   useEffect(() => {
     logApi.getSummary().then(res => setSummary(res.data)).catch(() => {})
+    endpointApi.list().then(res => setEndpoints(res.data)).catch(() => {})
   }, [])
 
   useEffect(() => { load() }, [page])
@@ -92,7 +95,21 @@ export default function Logs() {
 
       {/* 필터 */}
       <div className="card">
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+          {/* PC 선택 필터 - 가장 앞에 배치 */}
+          <select
+            value={filters.endpoint_hostname}
+            onChange={e => setFilters({...filters, endpoint_hostname: e.target.value})}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-blue-50 font-medium"
+          >
+            <option value="">🖥 전체 PC</option>
+            {endpoints.map(ep => (
+              <option key={ep.id} value={ep.hostname}>
+                {ep.hostname}{ep.location ? ` (${ep.location})` : ''}
+              </option>
+            ))}
+          </select>
+
           <select
             value={filters.event_type}
             onChange={e => setFilters({...filters, event_type: e.target.value})}
@@ -183,8 +200,15 @@ export default function Logs() {
                         <p className="text-xs text-gray-400">{log.user_email || ''}</p>
                       </td>
                       <td className="px-4 py-3">
-                        <p className="text-gray-600">{log.ip_address || '-'}</p>
-                        <p className="text-xs text-gray-400">{log.endpoint_hostname || ''}</p>
+                        {log.endpoint_hostname && (
+                          <div className="flex items-center gap-1 mb-0.5">
+                            <Monitor className="w-3 h-3 text-blue-500" />
+                            <span className="text-xs font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">
+                              {log.endpoint_hostname}
+                            </span>
+                          </div>
+                        )}
+                        <p className="text-xs text-gray-400">{log.ip_address || '-'}</p>
                       </td>
                       <td className="px-4 py-3 text-gray-500 text-xs max-w-32 truncate">
                         {log.resource || log.description || '-'}

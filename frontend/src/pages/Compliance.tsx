@@ -3,8 +3,8 @@
  * 규제 컴플라이언스 체크리스트 및 점검 관리
  */
 import { useState, useEffect } from 'react'
-import { ClipboardCheck, Play, CheckCircle, XCircle, AlertTriangle, Minus, Info, ChevronDown, ChevronUp } from 'lucide-react'
-import { complianceApi } from '../api/client'
+import { ClipboardCheck, Play, CheckCircle, XCircle, AlertTriangle, Minus, Info, ChevronDown, ChevronUp, Monitor } from 'lucide-react'
+import { complianceApi, endpointApi } from '../api/client'
 
 interface Check {
   id: number; title: string; total_score: number; privacy_score: number
@@ -42,6 +42,8 @@ export default function Compliance() {
   const [creating, setCreating] = useState(false)
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set())
   const [editingStatus, setEditingStatus] = useState<Record<number, string>>({})
+  const [endpoints, setEndpoints] = useState<{id:number; hostname:string; location:string|null; status:string}[]>([])
+  const [selectedEndpointId, setSelectedEndpointId] = useState<number | null>(null)
 
   const loadChecks = () => {
     setLoading(true)
@@ -68,7 +70,13 @@ export default function Compliance() {
       .catch(console.error)
   }
 
-  useEffect(() => { loadChecks() }, [])
+  useEffect(() => {
+    loadChecks()
+    endpointApi.list().then(res => {
+      setEndpoints(res.data)
+      if (res.data.length > 0) setSelectedEndpointId(res.data[0].id)
+    }).catch(() => {})
+  }, [])
 
   const handleCreateCheck = async () => {
     setCreating(true)
@@ -120,10 +128,25 @@ export default function Compliance() {
           <h2 className="text-lg font-semibold text-gray-800">규제 점검 (SafeGuard)</h2>
           <p className="text-sm text-gray-500">개인정보보호법·의료법 체크리스트 | 🤖 에이전트 수집 항목은 자동 판정됩니다</p>
         </div>
-        <button onClick={handleCreateCheck} disabled={creating} className="btn-primary flex items-center gap-2">
-          <Play className="w-4 h-4" />
-          {creating ? '생성 중...' : '새 점검 시작'}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* PC 선택 */}
+          <select
+            value={selectedEndpointId ?? ''}
+            onChange={e => setSelectedEndpointId(Number(e.target.value))}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-blue-50 font-medium"
+          >
+            {endpoints.map(ep => (
+              <option key={ep.id} value={ep.id}>
+                🖥 {ep.hostname}{ep.location ? ` (${ep.location})` : ''}
+                {ep.status === 'online' ? ' ●' : ' ○'}
+              </option>
+            ))}
+          </select>
+          <button onClick={handleCreateCheck} disabled={creating} className="btn-primary flex items-center gap-2">
+            <Play className="w-4 h-4" />
+            {creating ? '생성 중...' : '새 점검 시작'}
+          </button>
+        </div>
       </div>
 
       {/* 점검 이력 선택 */}

@@ -39,6 +39,7 @@ async def list_logs(
     start_date: Optional[date] = Query(None, description="시작 날짜 (YYYY-MM-DD)"),
     end_date: Optional[date] = Query(None, description="종료 날짜 (YYYY-MM-DD)"),
     user_email: Optional[str] = Query(None, description="사용자 이메일 검색"),
+    endpoint_hostname: Optional[str] = Query(None, description="PC명 필터"),
     keyword: Optional[str] = Query(None, description="키워드 검색 (설명, 리소스)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
@@ -64,6 +65,8 @@ async def list_logs(
         query = query.filter(AccessLog.occurred_at <= datetime.combine(end_date, datetime.max.time()))
     if user_email:
         query = query.filter(AccessLog.user_email.ilike(f"%{user_email}%"))
+    if endpoint_hostname:
+        query = query.filter(AccessLog.endpoint_hostname == endpoint_hostname)
     if keyword:
         query = query.filter(
             (AccessLog.description.ilike(f"%{keyword}%")) |

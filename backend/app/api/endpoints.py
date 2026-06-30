@@ -71,6 +71,12 @@ async def agent_enroll(
     에이전트 자동 등록 API (비밀번호 불필요)
     병원 등록코드(enroll_code)만으로 PC를 자동 등록하고 에이전트 토큰을 발급합니다.
     """
+    # 디버그 로그
+    import logging
+    logging.getLogger("medisafe").info(
+        f"[ENROLL] code={repr(data.enroll_code)} hostname={repr(data.hostname)} ip={data.ip_address}"
+    )
+
     # 등록 코드로 테넌트 조회
     tenant = db.query(Tenant).filter(
         Tenant.enroll_code == data.enroll_code.upper().strip(),
@@ -452,3 +458,5 @@ def _endpoint_to_dict(ep: Endpoint) -> dict:
         "last_seen_at": ep.last_seen_at.isoformat() if ep.last_seen_at else None,
         "registered_at": ep.registered_at.isoformat() if ep.registered_at else None,
     }
+
+# 이 아래는 임시 디버그용 - 삭제 필요
