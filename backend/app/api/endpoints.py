@@ -93,13 +93,13 @@ async def agent_enroll(
             detail=f"최대 등록 PC 수({tenant.max_endpoints}대)를 초과했습니다. 플랜을 업그레이드하세요."
         )
 
-    # 같은 hostname이 이미 있으면 재사용
+    # 같은 hostname + agent_token 있으면 재사용 (재설치 대응)
     existing = db.query(Endpoint).filter(
         Endpoint.tenant_id == tenant.id,
         Endpoint.hostname == data.hostname,
         Endpoint.is_active == True,
     ).first()
-    if existing:
+    if existing and existing.agent_token:
         return {
             "endpoint_id":  existing.id,
             "agent_token":  existing.agent_token,
