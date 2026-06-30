@@ -14,6 +14,7 @@ from app.core.security import get_current_user, get_current_admin
 from app.models.endpoint import Endpoint, EndpointStatus, OSType, USBEvent
 from app.models.user import User
 from app.services.security_score import calculate_endpoint_score
+from app.services import log_service
 
 router = APIRouter(prefix="/endpoints", tags=["SafeEndpoint"])
 
@@ -126,6 +127,12 @@ async def register_endpoint(
     db.commit()
     db.refresh(ep)
 
+    # SafeLog 기록
+    log_service.log_endpoint_registered(
+        db, current_user.tenant_id, current_user.id, current_user.name,
+        data.hostname, data.ip_address or "", data.os_type, commit=True
+    )
+
     result = _endpoint_to_dict(ep)
     result["agent_token"] = agent_token  # 최초 등록 시에만 토큰 반환
     return result
@@ -221,6 +228,20 @@ async def jwt_heartbeat(
     score_data = calculate_endpoint_score(ep)
     ep.security_score = score_data["total"]
 
+    # 보안 이슈 목록
+    issues = []
+    if ep.disk_encrypted is False:      issues.append("디스크 암호화 미설정")
+    if ep.antivirus_installed is False:  issues.append("백신 미설치")
+    if ep.os_patched is False:           issues.append("OS 업데이트 필요")
+    if ep.firewall_enabled is False:     issues.append("방화벽 비활성")
+    if ep.screen_lock_enabled is False:  issues.append("화면잠금 미설정")
+
+    # SafeLog 기록 (이슈 있을 때만 WARNING, 없으면 INFO)
+    log_service.log_agent_heartbeat(
+        db, ep.tenant_id, ep.id, ep.hostname,
+        ep.ip_address or "", score_data["total"], issues
+    )
+
     db.commit()
     return {
         "status": "ok",
@@ -241,15 +262,26 @@ async def report_usb_event_jwt(
     """JWT 인증 기반 USB 이벤트 기록 (에이전트 v0.1용)"""
     ep = _get_endpoint_or_404(db, endpoint_id, current_user.tenant_id)
 
+    device_name = data.get("device_name", "Unknown")
+    action      = data.get("action", "connected")
+    blocked     = data.get("blocked", False)
+
     event = USBEvent(
         tenant_id=ep.tenant_id,
         endpoint_id=ep.id,
-        event_type=data.get("action", "connected"),
-        device_name=data.get("device_name", "Unknown"),
+        event_type=action,
+        device_name=device_name,
         device_id=data.get("device_id", ""),
-        blocked=data.get("blocked", False),
+        blocked=blocked,
     )
     db.add(event)
+
+    # SafeLog 기록
+    log_service.log_usb_event(
+        db, ep.tenant_id, ep.id, ep.hostname,
+        device_name, action, blocked
+    )
+
     db.commit()
     return {"status": "recorded", "endpoint_id": ep.id}
 
@@ -263,6 +295,9 @@ async def deactivate_endpoint(
     """엔드포인트를 비활성화합니다. (물리적 삭제 없음)"""
     ep = _get_endpoint_or_404(db, endpoint_id, current_user.tenant_id)
     ep.is_active = False
+    log_service.log_endpoint_deactivated(
+        db, current_user.tenant_id, current_user.id, current_user.name, ep.hostname
+    )
     db.commit()
     return {"message": f"{ep.hostname} 엔드포인트가 비활성화되었습니다."}
 

@@ -26,6 +26,7 @@ from app.core.rate_limit import limiter, LOGIN_LIMIT, API_LIMIT
 from app.models.user import User
 from app.models.audit import AuditAction, AuditSeverity
 from app.services.audit_service import write_audit
+from app.services import log_service
 
 router = APIRouter(prefix="/auth", tags=["인증"])
 
@@ -106,11 +107,14 @@ async def login(
                     resource_desc=f"비밀번호 불일치 ({attempts}번째 실패)")
 
         if remaining_attempts > 0:
+            log_service.log_login_fail(db, user.tenant_id, data.email, ip,
+                f"비밀번호 불일치 ({attempts}번째 실패, 잔여 {remaining_attempts}회)")
             raise HTTPException(
                 status_code=401,
                 detail=f"{_GENERIC_ERROR} ({remaining_attempts}회 더 실패 시 계정이 잠깁니다.)"
             )
         else:
+            log_service.log_account_locked(db, user.tenant_id, data.email, ip)
             raise HTTPException(
                 status_code=423,
                 detail="로그인 시도 초과로 계정이 잠겼습니다. 30분 후 다시 시도하세요."
@@ -118,6 +122,8 @@ async def login(
 
     # 로그인 성공
     record_login_success(user, db)
+    # SafeLog 기록
+    log_service.log_login_success(db, user.tenant_id, user.id, user.name, user.email, ip)
 
     # Argon2 rehash 필요 시 자동 업그레이드
     if needs_rehash(user.hashed_password):
@@ -233,5 +239,8 @@ async def change_password(
                 tenant_id=current_user.tenant_id, user_id=current_user.id,
                 result="success", severity=AuditSeverity.INFO,
                 ip_address=ip)
+    log_service.log_password_change(db, current_user.tenant_id,
+                current_user.id, current_user.name, current_user.email, ip)
+    db.commit()
 
     return {"message": "비밀번호가 변경되었습니다."}
