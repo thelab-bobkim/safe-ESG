@@ -62,9 +62,23 @@ export default function Compliance() {
     setActiveCheck(check)
     complianceApi.getCheckDetail(check.id)
       .then(res => {
-        setResults(res.data.results || [])
+        const data = res.data
+        // 상세 API 응답의 점수로 activeCheck 업데이트 (목록 캐시 덮어쓰기)
+        setActiveCheck({
+          ...check,
+          total_score:   data.total_score   ?? check.total_score,
+          privacy_score: data.privacy_score ?? check.privacy_score,
+          medical_score: data.medical_score ?? check.medical_score,
+          emr_score:     data.emr_score     ?? check.emr_score,
+          pass_count:    data.pass_count    ?? check.pass_count,
+          fail_count:    data.fail_count    ?? check.fail_count,
+          partial_count: data.partial_count ?? check.partial_count,
+          na_count:      data.na_count      ?? check.na_count,
+          checked_by_name: data.checked_by_name ?? check.checked_by_name,
+        })
+        setResults(data.results || [])
         const statusMap: Record<number, string> = {}
-        res.data.results?.forEach((r: CheckResult) => { statusMap[r.item_id] = r.status })
+        data.results?.forEach((r: CheckResult) => { statusMap[r.item_id] = r.status })
         setEditingStatus(statusMap)
       })
       .catch(console.error)
