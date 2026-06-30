@@ -1,218 +1,155 @@
 """
-MediSafe Clinic - PC 보안 에이전트 메인
-사내 PC에서 실행하면 MediSafe 서버로 보안 정보를 자동 전송합니다.
-
-실행방법:
-  python agent.py           # 일반 실행 (5분마다 heartbeat)
-  python agent.py --test    # 즉시 1회 테스트 후 종료
-  python agent.py --setup   # 최초 등록만 수행
+MediSafe Clinic - PC 보안 에이전트 v2.0
+병원 등록코드 기반 자동 등록 (비밀번호 불필요)
 """
-
-import sys
-import time
-import argparse
-import schedule
+import sys, time, json, schedule
 from datetime import datetime
 from pathlib import Path
 
 try:
     from colorama import Fore, Style, init
     init(autoreset=True)
-    COLOR = True
-except ImportError:
-    COLOR = False
+    G = Fore.GREEN; R = Fore.RED; Y = Fore.YELLOW; C = Fore.CYAN; RST = Style.RESET_ALL
+except:
+    G = R = Y = C = RST = ""
 
-import config
-import collector
-from api_client import MediSafeClient
-
-# 에이전트 상태 저장 파일
-STATE_FILE = Path(__file__).parent / ".agent_state.json"
-
-# ──────────────────────────────────────────────
-# 출력 헬퍼
-# ──────────────────────────────────────────────
-
-def c(text: str, color: str = "") -> str:
-    if not COLOR:
-        return text
-    colors = {
-        "green": Fore.GREEN, "red": Fore.RED,
-        "yellow": Fore.YELLOW, "cyan": Fore.CYAN,
-        "blue": Fore.BLUE, "bold": Style.BRIGHT,
-    }
-    return f"{colors.get(color, '')}{text}{Style.RESET_ALL}"
-
-def banner():
-    print(c("""
-╔═══════════════════════════════════════════════╗
-║       MediSafe Clinic - PC 보안 에이전트       ║
-║            병·의원 의료정보보호 솔루션           ║
-╚═══════════════════════════════════════════════╝
-""", "cyan"))
-
-def log(msg: str, level: str = "info"):
+def log(msg, level="info"):
     ts = datetime.now().strftime("%H:%M:%S")
-    icons = {"info": "ℹ", "ok": "✅", "warn": "⚠️ ", "error": "❌", "send": "📡"}
-    colors = {"info": "blue", "ok": "green", "warn": "yellow", "error": "red", "send": "cyan"}
-    icon = icons.get(level, "·")
-    col = colors.get(level, "")
-    print(c(f"[{ts}] {icon}  {msg}", col))
+    col = {"ok":G,"warn":Y,"error":R,"send":C}.get(level,"")
+    icon = {"ok":"OK","warn":"!!","error":"XX","send":">>","info":"  "}.get(level,"  ")
+    print(f"{col}[{ts}][{icon}] {msg}{RST}")
 
-# ──────────────────────────────────────────────
-# 상태 파일 관리
-# ──────────────────────────────────────────────
+def setup(client):
+    import sys
+    config = sys.modules.get("config") or load_config()
+    import collector
 
-def save_state(endpoint_id: int):
-    import json
-    STATE_FILE.write_text(json.dumps({"endpoint_id": endpoint_id}))
-
-def load_state() -> int | None:
-    import json
-    if STATE_FILE.exists():
-        try:
-            return json.loads(STATE_FILE.read_text()).get("endpoint_id")
-        except Exception:
-            pass
-    return None
-
-# ──────────────────────────────────────────────
-# 에이전트 초기화 (등록)
-# ──────────────────────────────────────────────
-
-def setup(client: MediSafeClient) -> int | None:
-    """서버 연결 확인 → 로그인 → PC 등록"""
     log("서버 연결 확인 중...")
     if not client.health_check():
-        log(f"서버에 연결할 수 없습니다: {config.SERVER_URL}", "error")
-        log("인터넷 연결 또는 서버 주소를 확인하세요", "warn")
-        return None
-    log(f"서버 연결 OK: {config.SERVER_URL}", "ok")
+        log(f"서버 연결 실패: {config.SERVER_URL}", "error")
+        return None, None
+    log("서버 연결 OK", "ok")
 
-    # 저장된 토큰 확인
-    if client.load_token() and client.verify_token():
-        log("저장된 인증 토큰 사용", "ok")
-    else:
-        log("원장 계정으로 로그인 중...")
-        if not client.login(config.REGISTER_EMAIL, config.REGISTER_PASSWORD):
-            log("로그인 실패. config.py의 이메일/비밀번호를 확인하세요.", "error")
-            return None
-        log(f"로그인 성공: {config.REGISTER_EMAIL}", "ok")
+    # 구버전 상태파일 확인 — agent_token 없으면 재등록
+    endpoint_id, agent_token = client.load_state()
+    if endpoint_id and agent_token:
+        log(f"기존 등록 PC 사용: ID={endpoint_id}", "ok")
+        return endpoint_id, agent_token
 
-    # 기존 등록 확인
-    endpoint_id = load_state()
-    if endpoint_id:
-        log(f"기존 등록된 PC: ID={endpoint_id}", "ok")
-        return endpoint_id
+    # 구버전 .agent_state.json (endpoint_id만 있고 token 없는 경우) 삭제
+    STATE_FILE = Path(__file__).parent / ".agent_state.json"
+    if STATE_FILE.exists():
+        try:
+            d = json.loads(STATE_FILE.read_text())
+            if d.get("endpoint_id") and not d.get("agent_token"):
+                STATE_FILE.unlink()
+                log("구버전 상태파일 삭제 → 재등록", "warn")
+        except:
+            STATE_FILE.unlink()
 
-    # 신규 등록
-    log("이 PC를 MediSafe에 등록 중...")
+    # 등록코드로 자동 등록
+    log(f"이 PC를 MediSafe에 자동 등록 중... (코드: {config.ENROLL_CODE})")
     data = collector.collect_all()
-    endpoint_id = client.register_endpoint(
-        hostname=data["hostname"],
-        ip=data["ip_address"],
-        location=config.PC_LOCATION,
-        os_info=data["os_info"],
+    # PC_NAME이 있으면 사용, 없으면 시스템 hostname 사용
+    pc_name = getattr(config, 'PC_NAME', '').strip() or data["hostname"]
+    endpoint_id, agent_token = client.enroll(
+        enroll_code = config.ENROLL_CODE,
+        hostname    = pc_name,
+        ip          = data["ip_address"],
+        os_type     = data["os_info"].get("system", "windows"),
+        os_version  = data["os_info"].get("release", ""),
+        location    = config.PC_LOCATION or "",
     )
     if endpoint_id:
-        save_state(endpoint_id)
-        log(f"PC 등록 완료! endpoint_id={endpoint_id}", "ok")
-        return endpoint_id
+        log(f"자동 등록 완료! ID={endpoint_id}", "ok")
+        return endpoint_id, agent_token
 
-    log("PC 등록 실패", "error")
-    return None
-
-# ──────────────────────────────────────────────
-# Heartbeat (주기적 보안 상태 전송)
-# ──────────────────────────────────────────────
+    log("등록 실패 — 등록 코드를 확인하세요.", "error")
+    return None, None
 
 _prev_usb = set()
 
-def do_heartbeat(client: MediSafeClient, endpoint_id: int):
-    """보안 상태 수집 후 서버 전송"""
+def do_heartbeat(client, endpoint_id, agent_token):
+    import sys
+    config = sys.modules.get("config") or load_config()
+    import collector
     log("보안 상태 수집 중...", "send")
     data = collector.collect_all()
 
-    # Heartbeat 전송
-    ok = client.send_heartbeat(endpoint_id, data)
-    if not ok:
-        # 토큰 만료 시 재로그인
-        log("토큰 재발급 시도...", "warn")
-        if client.login(config.REGISTER_EMAIL, config.REGISTER_PASSWORD):
-            client.send_heartbeat(endpoint_id, data)
+    pc_name  = getattr(config, 'PC_NAME', '').strip() or None
+    location = getattr(config, 'PC_LOCATION', '').strip() or None
+    client.send_heartbeat(endpoint_id, agent_token, data, pc_name=pc_name, location=location)
 
-    # USB 변경 감지
+    # USB 변화 감지
     global _prev_usb
-    current_usb = {d["name"] for d in data.get("usb_devices", [])}
-    new_devices  = current_usb - _prev_usb
-    removed      = _prev_usb  - current_usb
+    cur = {d["name"] for d in data.get("usb_devices", [])}
+    for dev in cur - _prev_usb:
+        log(f"USB 연결: {dev}", "warn")
+        client.send_usb_event(agent_token, dev, "connected")
+    for dev in _prev_usb - cur:
+        client.send_usb_event(agent_token, dev, "disconnected")
+    _prev_usb = cur
 
-    for dev in new_devices:
-        log(f"USB 연결 감지: {dev}", "warn")
-        client.send_usb_event(endpoint_id, dev, "connected")
-
-    for dev in removed:
-        log(f"USB 제거 감지: {dev}", "info")
-        client.send_usb_event(endpoint_id, dev, "disconnected")
-
-    _prev_usb = current_usb
-
-    # 보안 이슈 요약 출력
+    # 보안 이슈 출력
     issues = []
-    if data["disk_encrypted"] is False:   issues.append("⚠️  디스크 암호화 미설정")
-    if data["antivirus_installed"] is False: issues.append("⚠️  백신 미설치")
-    if data["os_patched"] is False:       issues.append("⚠️  OS 업데이트 필요")
-    if data["firewall_enabled"] is False: issues.append("⚠️  방화벽 비활성")
-    if data["screen_lock_enabled"] is False: issues.append("⚠️  화면잠금 미설정")
+    if data.get("disk_encrypted") is False:      issues.append("디스크 암호화 미설정")
+    if data.get("antivirus_installed") is False:  issues.append("백신 미설치")
+    if data.get("os_patched") is False:           issues.append("OS 업데이트 필요")
+    if data.get("firewall_enabled") is False:     issues.append("방화벽 비활성")
+    if data.get("screen_lock_enabled") is False:  issues.append("화면잠금 미설정")
 
     if issues:
-        for issue in issues:
-            log(issue, "warn")
+        for i in issues: log(f"보안 이슈: {i}", "warn")
     else:
         log("모든 보안 항목 정상", "ok")
 
-# ──────────────────────────────────────────────
-# 메인 진입점
-# ──────────────────────────────────────────────
+def load_config():
+    """config.py를 인코딩 자동 감지로 로드 (UTF-8 BOM, CP949, UTF-8 모두 처리)"""
+    import importlib, sys
+    config_path = Path(__file__).parent / "config.py"
+    for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
+        try:
+            src = config_path.read_text(encoding=enc)
+            spec = importlib.util.spec_from_loader("config", loader=None)
+            mod  = type(sys)("config")
+            exec(compile(src, str(config_path), "exec"), mod.__dict__)
+            sys.modules["config"] = mod
+            return mod
+        except Exception:
+            continue
+    raise RuntimeError("config.py 읽기 실패 — 파일 인코딩을 확인하세요")
 
 def main():
-    banner()
+    import importlib.util
+    config = load_config()
+    from api_client import MediSafeClient
 
-    parser = argparse.ArgumentParser(description="MediSafe 에이전트")
-    parser.add_argument("--test",  action="store_true", help="1회 테스트 후 종료")
-    parser.add_argument("--setup", action="store_true", help="최초 등록만 수행")
-    args = parser.parse_args()
-
-    client = MediSafeClient(config.SERVER_URL)
-
-    # ── 초기화 ──
-    log("에이전트 초기화 중...")
-    endpoint_id = setup(client)
-    if not endpoint_id:
-        log("초기화 실패. 프로그램을 종료합니다.", "error")
-        sys.exit(1)
-
-    if args.setup:
-        log("등록 완료. --setup 모드 종료.", "ok")
-        return
-
-    # ── 1회 즉시 실행 ──
-    log(f"첫 번째 Heartbeat 전송...")
-    do_heartbeat(client, endpoint_id)
-
-    if args.test:
-        log("테스트 완료!", "ok")
-        log(f"👉 결과 확인: {config.SERVER_URL}", "info")
-        return
-
-    # ── 스케줄 설정 ──
-    interval = config.HEARTBEAT_INTERVAL_MIN
-    schedule.every(interval).minutes.do(do_heartbeat, client, endpoint_id)
-    log(f"스케줄 설정 완료: {interval}분마다 보안 상태 전송", "ok")
-    log(f"종료하려면 Ctrl+C를 누르세요", "info")
+    print()
+    pc_label = getattr(config, 'PC_NAME', '').strip() or "(자동감지)"
+    print(f"{C}  MediSafe Clinic - PC 보안 에이전트 v2.0{RST}")
+    print(f"{C}  PC명: {pc_label}  |  등록코드: {config.ENROLL_CODE}{RST}")
+    print(f"{C}  서버: {config.SERVER_URL}{RST}")
     print()
 
-    # ── 실행 루프 ──
+    client = MediSafeClient(config.SERVER_URL)
+    endpoint_id, agent_token = setup(client)
+    if not endpoint_id:
+        log("초기화 실패. 등록 코드를 확인하고 다시 시도하세요.", "error")
+        input("\n종료하려면 Enter...")
+        sys.exit(1)
+
+    do_heartbeat(client, endpoint_id, agent_token)
+
+    if "--test" in sys.argv:
+        log(f"테스트 완료! 대시보드: {config.SERVER_URL}", "ok")
+        return
+
+    schedule.every(config.HEARTBEAT_INTERVAL_MIN).minutes.do(
+        do_heartbeat, client, endpoint_id, agent_token
+    )
+    log(f"{config.HEARTBEAT_INTERVAL_MIN}분마다 자동 전송 시작", "ok")
+    print()
+
     while True:
         schedule.run_pending()
         time.sleep(10)
@@ -221,5 +158,5 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n")
-        log("에이전트 종료됨", "info")
+        print()
+        log("에이전트 종료")
