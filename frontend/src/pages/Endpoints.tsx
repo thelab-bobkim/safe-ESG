@@ -1,9 +1,9 @@
 /**
  * MediSafe Clinic - SafeEndpoint 페이지
- * 병원 내 PC 보안 상태 관리
+ * 병원 내 PC 보안 상태 관리 + 항목별 조치 가이드
  */
 import { useState, useEffect } from 'react'
-import { Monitor, Plus, CheckCircle, XCircle, AlertTriangle, Wifi, WifiOff, RefreshCw, Download, Info } from 'lucide-react'
+import { Monitor, Plus, RefreshCw, Download, Info, Wifi, WifiOff, AlertTriangle, CheckCircle, X, ChevronRight } from 'lucide-react'
 import { endpointApi } from '../api/client'
 
 interface Endpoint {
@@ -14,26 +14,209 @@ interface Endpoint {
   last_seen_at: string | null; registered_at: string | null
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
-  online: { label: '온라인', color: 'text-green-600', bg: 'bg-green-50', icon: <Wifi className="w-3 h-3" /> },
-  offline: { label: '오프라인', color: 'text-gray-400', bg: 'bg-gray-50', icon: <WifiOff className="w-3 h-3" /> },
-  warning: { label: '경고', color: 'text-yellow-600', bg: 'bg-yellow-50', icon: <AlertTriangle className="w-3 h-3" /> },
-  critical: { label: '위험', color: 'text-red-600', bg: 'bg-red-50', icon: <AlertTriangle className="w-3 h-3" /> },
+// ── 보안 항목별 가이드 정의 ─────────────────────────────────────────────
+interface SecurityItem {
+  key: keyof Endpoint
+  label: string
+  icon: string
+  passGuide: string
+  failGuide: string
+  unknownGuide: string
+  regulation: string
 }
 
-function BooleanBadge({ value, trueLabel = '완료', falseLabel = '미완료' }: {
-  value: boolean | null; trueLabel?: string; falseLabel?: string
-}) {
-  if (value === null) return <span className="badge-info">미확인</span>
+const SECURITY_ITEMS: SecurityItem[] = [
+  {
+    key: 'disk_encrypted',
+    label: '디스크 암호화',
+    icon: '💾',
+    regulation: '개인정보보호법 제29조 제4호',
+    passGuide: `✅ BitLocker가 활성화되어 있습니다.
+
+• PC 분실/도난 시에도 환자 개인정보가 보호됩니다.
+• 복구 키를 USB나 인쇄물로 별도 보관하고 있는지 확인하세요.`,
+    failGuide: `❌ BitLocker(디스크 암호화)가 꺼져 있습니다.
+
+[즉시 조치 방법]
+1. Windows 검색창에 "BitLocker" 입력
+2. "BitLocker 드라이브 암호화" 클릭
+3. C: 드라이브 → "BitLocker 켜기" 클릭
+4. 복구 키 저장 방법 선택 → "파일에 저장" 권장
+5. 암호화 시작 (수 시간 소요, PC 정상 사용 가능)
+
+⚠️ 주의: 복구 키를 잃어버리면 데이터 접근 불가 → 반드시 별도 보관`,
+    unknownGuide: `⚠️ 에이전트가 아직 데이터를 전송하지 않았습니다.
+
+[확인 방법]
+1. 이 PC에 MediSafe 에이전트가 설치되어 있는지 확인
+2. 에이전트 설치 후 5분 내에 자동으로 상태가 업데이트됩니다
+3. Windows 검색 → "BitLocker" → 현재 활성화 여부 직접 확인 가능`,
+  },
+  {
+    key: 'antivirus_installed',
+    label: '백신(바이러스 방지)',
+    icon: '🛡️',
+    regulation: '개인정보보호법 제29조 제5호',
+    passGuide: `✅ Windows Defender(백신)가 활성화되어 있습니다.
+
+• 실시간 보호가 켜져 있어 랜섬웨어·악성코드로부터 보호됩니다.
+• 바이러스 정의 파일이 최신 상태인지 주기적으로 확인하세요.`,
+    failGuide: `❌ 백신(실시간 보호)이 꺼져 있습니다.
+
+[즉시 조치 방법]
+1. 작업 표시줄 방패 아이콘 클릭 또는
+   Windows 설정 → 개인 정보 및 보안 → Windows 보안
+2. "바이러스 및 위협 방지" 클릭
+3. "실시간 보호" 토글 → 켜기
+
+[타사 백신이 있는 경우]
+• V3, 알약, 카스퍼스키 등이 설치된 경우: 해당 백신 정상 작동 확인
+• Windows Defender는 타사 백신 설치 시 자동으로 꺼지는 것이 정상
+
+⚠️ 백신 없는 PC: 랜섬웨어 감염 시 환자 기록 전체 손실 위험`,
+    unknownGuide: `⚠️ 에이전트 미설치 또는 데이터 수신 전입니다.
+
+[확인 방법]
+• Windows 보안 → 바이러스 및 위협 방지 → 실시간 보호 상태 직접 확인
+• 에이전트 설치 후 자동으로 탐지됩니다`,
+  },
+  {
+    key: 'antivirus_updated',
+    label: '백신 업데이트',
+    icon: '🔄',
+    regulation: '개인정보보호법 제29조 제5호',
+    passGuide: `✅ 백신 바이러스 정의 파일이 최신 상태입니다.`,
+    failGuide: `❌ 백신 업데이트가 필요합니다.
+
+[조치 방법]
+1. Windows 보안 → 바이러스 및 위협 방지
+2. "보호 업데이트" → "업데이트 확인" 클릭
+3. 자동 업데이트 설정 확인: Windows Update → 고급 옵션 → 자동 다운로드 켜기
+
+• Windows Defender는 인터넷 연결 시 자동 업데이트됩니다
+• 수동으로 업데이트하려면 위 방법으로 즉시 최신화 가능`,
+    unknownGuide: `⚠️ 에이전트 미설치 또는 데이터 수신 전입니다.
+
+• 에이전트 설치 후 자동으로 탐지됩니다
+• 직접 확인: Windows 보안 → 바이러스 및 위협 방지 → 보호 업데이트`,
+  },
+  {
+    key: 'os_patched',
+    label: 'OS 최신 패치',
+    icon: '📦',
+    regulation: '개인정보보호법 제29조',
+    passGuide: `✅ 운영체제 보안 패치가 최신 상태입니다.
+
+• 알려진 취약점이 모두 패치되어 해킹 위험이 낮습니다.
+• Windows Update 자동 설치를 유지하세요.`,
+    failGuide: `❌ OS 보안 업데이트가 필요합니다.
+
+[즉시 조치 방법]
+1. Windows 설정 → Windows Update → "지금 업데이트 확인"
+2. 모든 보안 업데이트 설치 후 재시작
+3. 자동 업데이트 켜기: Windows Update → 고급 옵션 → 자동으로 다운로드 및 설치
+
+⚠️ 업데이트 중 재시작 필요 → 진료 종료 후 업데이트 권장`,
+    unknownGuide: `⚠️ 에이전트 미설치 또는 데이터 수신 전입니다.
+
+• 직접 확인: Windows 설정 → Windows Update
+• 에이전트 설치 후 자동으로 탐지됩니다`,
+  },
+  {
+    key: 'firewall_enabled',
+    label: '방화벽',
+    icon: '🔥',
+    regulation: '개인정보보호법 제29조 제2호',
+    passGuide: `✅ Windows 방화벽이 활성화되어 있습니다.
+
+• 외부로부터의 무단 네트워크 접근이 차단됩니다.
+• 도메인/개인/공용 프로필 모두 켜져 있는지 확인하세요.`,
+    failGuide: `❌ 방화벽이 꺼져 있습니다.
+
+[즉시 조치 방법]
+1. Windows 검색 → "방화벽" → "Windows Defender 방화벽" 클릭
+2. 왼쪽 "Windows Defender 방화벽 켜기/끄기"
+3. 도메인 네트워크 / 개인 네트워크 / 공용 네트워크 모두 → "켜기" 선택
+
+⚠️ 방화벽이 꺼진 PC는 동일 네트워크 내 악성 트래픽에 무방비 상태`,
+    unknownGuide: `⚠️ 에이전트 미설치 또는 데이터 수신 전입니다.
+
+• 직접 확인: 제어판 → Windows Defender 방화벽 → 상태 확인
+• 에이전트 설치 후 자동으로 탐지됩니다`,
+  },
+  {
+    key: 'screen_lock_enabled',
+    label: '화면 잠금',
+    icon: '🔒',
+    regulation: '개인정보보호법 제29조 제6호',
+    passGuide: `✅ 화면 잠금(화면 보호기)이 설정되어 있습니다.
+
+• 자리를 비울 때 환자 화면이 자동으로 잠깁니다.
+• 빠른 잠금: Windows + L 단축키를 습관화하세요.`,
+    failGuide: `❌ 화면 잠금이 설정되지 않았습니다.
+
+[즉시 조치 방법]
+1. 바탕화면 우클릭 → 개인 설정 → 잠금 화면
+2. 화면 보호기 설정 → 대기 시간 5분 → "다시 시작할 때 로그온 화면 표시" 체크
+   또는
+3. Windows 설정 → 계정 → 로그인 옵션 → "자동으로 잠금"
+
+⚠️ 진료 중 자리를 비울 때 항상 Windows + L 로 즉시 잠금`,
+    unknownGuide: `⚠️ 에이전트 미설치 또는 데이터 수신 전입니다.
+
+• 직접 확인: Windows 설정 → 개인 설정 → 잠금 화면
+• 에이전트 설치 후 자동으로 탐지됩니다`,
+  },
+  {
+    key: 'usb_blocked',
+    label: 'USB 모니터링',
+    icon: '🚫',
+    regulation: '개인정보보호법 제29조 제6호',
+    passGuide: `✅ USB 이벤트 모니터링이 활성화되어 있습니다.
+
+• USB 장치 연결/해제가 SafeLog에 자동 기록됩니다.
+• 비정상 USB 사용 시 즉시 경보가 발생합니다.`,
+    failGuide: `❌ USB 모니터링이 비활성 상태입니다.
+
+[조치 방법]
+• MediSafe 에이전트 v0.2 이상에서 USB 모니터링이 지원됩니다
+• 에이전트를 최신 버전으로 업데이트하세요
+• 운영 정책: USB 반출 대장을 별도로 운영하는 것을 권장합니다`,
+    unknownGuide: `⚠️ 에이전트 미설치 또는 데이터 수신 전입니다.
+
+• MediSafe 에이전트 설치 시 USB 연결/해제 이벤트가 자동으로 기록됩니다
+• SafeLog에서 USB 이벤트를 확인할 수 있습니다`,
+  },
+]
+
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
+  online:   { label: '온라인',   color: 'text-green-600',  bg: 'bg-green-50',  icon: <Wifi className="w-3 h-3" /> },
+  offline:  { label: '오프라인', color: 'text-gray-400',   bg: 'bg-gray-50',   icon: <WifiOff className="w-3 h-3" /> },
+  warning:  { label: '경고',     color: 'text-yellow-600', bg: 'bg-yellow-50', icon: <AlertTriangle className="w-3 h-3" /> },
+  critical: { label: '위험',     color: 'text-red-600',    bg: 'bg-red-50',    icon: <AlertTriangle className="w-3 h-3" /> },
+}
+
+function getItemStatus(val: boolean | null): 'pass' | 'fail' | 'unknown' {
+  if (val === null) return 'unknown'
+  return val ? 'pass' : 'fail'
+}
+
+function StatusBadge({ value }: { value: boolean | null }) {
+  if (value === null) return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+      <span className="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block" />미확인
+    </span>
+  )
   return value
-    ? <span className="badge-pass">✓ {trueLabel}</span>
-    : <span className="badge-fail">✗ {falseLabel}</span>
+    ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">✓ 완료</span>
+    : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-600">✗ 미완료</span>
 }
 
 export default function Endpoints() {
   const [endpoints, setEndpoints] = useState<Endpoint[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Endpoint | null>(null)
+  const [activeGuide, setActiveGuide] = useState<SecurityItem | null>(null)
   const [showAdd, setShowAdd] = useState(false)
 
   const load = () => {
@@ -46,10 +229,9 @@ export default function Endpoints() {
 
   useEffect(() => { load() }, [])
 
-  const scoreColor = (score: number) =>
-    score >= 80 ? 'text-green-600' : score >= 60 ? 'text-yellow-600' : 'text-red-600'
-  const scoreBg = (score: number) =>
-    score >= 80 ? 'bg-green-50' : score >= 60 ? 'bg-yellow-50' : 'bg-red-50'
+  const scoreColor = (s: number) => s >= 80 ? 'text-green-600' : s >= 60 ? 'text-yellow-600' : 'text-red-600'
+  const scoreBg    = (s: number) => s >= 80 ? 'bg-green-50'  : s >= 60 ? 'bg-yellow-50'  : 'bg-red-50'
+  const scoreGrade = (s: number) => s >= 80 ? 'A' : s >= 60 ? 'B' : s >= 40 ? 'C' : 'F'
 
   return (
     <div className="space-y-4">
@@ -84,12 +266,12 @@ export default function Endpoints() {
         ))}
       </div>
 
-      {/* 엔드포인트 테이블 */}
+      {/* 테이블 */}
       <div className="card p-0 overflow-hidden">
         <table className="w-full">
           <thead className="bg-gray-50 border-b border-gray-100">
             <tr>
-              {['PC명', '위치', 'OS', '상태', '보안점수', '디스크 암호화', '백신', '패치', '마지막 접속'].map(h => (
+              {['PC명','위치','OS','상태','보안점수','디스크 암호화','백신','패치','마지막 접속'].map(h => (
                 <th key={h} className="text-left text-xs font-medium text-gray-500 px-4 py-3">{h}</th>
               ))}
             </tr>
@@ -99,114 +281,183 @@ export default function Endpoints() {
               <tr><td colSpan={9} className="text-center py-8 text-gray-400">로딩 중...</td></tr>
             ) : endpoints.length === 0 ? (
               <tr><td colSpan={9} className="text-center py-8 text-gray-400">등록된 PC가 없습니다</td></tr>
-            ) : (
-              endpoints.map(ep => {
-                const status = STATUS_CONFIG[ep.status] || STATUS_CONFIG.offline
-                return (
-                  <tr
-                    key={ep.id}
-                    className="hover:bg-blue-50/30 cursor-pointer transition-colors"
-                    onClick={() => setSelected(ep)}
-                  >
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <Monitor className="w-4 h-4 text-gray-400" />
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">{ep.hostname}</p>
-                          <p className="text-xs text-gray-400">{ep.ip_address}</p>
-                        </div>
+            ) : endpoints.map(ep => {
+              const statusCfg = STATUS_CONFIG[ep.status] || STATUS_CONFIG.offline
+              return (
+                <tr key={ep.id} className="hover:bg-blue-50/30 cursor-pointer transition-colors"
+                    onClick={() => { setSelected(ep); setActiveGuide(null) }}>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <Monitor className="w-4 h-4 text-gray-400" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{ep.hostname}</p>
+                        <p className="text-xs text-gray-400">{ep.ip_address}</p>
                       </div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{ep.location || '-'}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{ep.os_version || ep.os_type}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full ${status.bg} ${status.color}`}>
-                        {status.icon}{status.label}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{ep.location || '-'}</td>
+                  <td className="px-4 py-3 text-xs text-gray-500">{ep.os_version || ep.os_type}</td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full ${statusCfg.bg} ${statusCfg.color}`}>
+                      {statusCfg.icon}{statusCfg.label}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg ${scoreBg(ep.security_score)}`}>
+                      <span className={`text-sm font-bold ${scoreColor(ep.security_score)}`}>
+                        {ep.security_score?.toFixed(0) ?? 0}점
                       </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg ${scoreBg(ep.security_score)}`}>
-                        <span className={`text-sm font-bold ${scoreColor(ep.security_score)}`}>
-                          {ep.security_score?.toFixed(0) ?? 0}점
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3"><BooleanBadge value={ep.disk_encrypted} /></td>
-                    <td className="px-4 py-3"><BooleanBadge value={ep.antivirus_installed} /></td>
-                    <td className="px-4 py-3"><BooleanBadge value={ep.os_patched} /></td>
-                    <td className="px-4 py-3 text-xs text-gray-400">
-                      {ep.last_seen_at
-                        ? new Date(ep.last_seen_at).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                        : '-'
-                      }
-                    </td>
-                  </tr>
-                )
-              })
-            )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3"><StatusBadge value={ep.disk_encrypted} /></td>
+                  <td className="px-4 py-3"><StatusBadge value={ep.antivirus_installed} /></td>
+                  <td className="px-4 py-3"><StatusBadge value={ep.os_patched} /></td>
+                  <td className="px-4 py-3 text-xs text-gray-400">
+                    {ep.last_seen_at
+                      ? new Date(ep.last_seen_at).toLocaleString('ko-KR',
+                          { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })
+                      : '-'}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
 
-      {/* 상세 모달 */}
+      {/* PC 상세 + 조치 가이드 모달 */}
       {selected && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg">
-            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-gray-900">{selected.hostname}</h3>
-                <p className="text-sm text-gray-500">{selected.ip_address} · {selected.location}</p>
+        <div className="fixed inset-0 bg-black/40 flex items-start justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl my-8">
+            {/* 모달 헤더 */}
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Monitor className="w-5 h-5 text-blue-600" />
+                <div>
+                  <h3 className="font-bold text-gray-900">{selected.hostname}</h3>
+                  <p className="text-xs text-gray-500">{selected.ip_address} · {selected.location || '위치 미설정'}</p>
+                </div>
               </div>
-              <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600">✕</button>
+              <button onClick={() => { setSelected(null); setActiveGuide(null) }}
+                      className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100">
+                <X className="w-5 h-5" />
+              </button>
             </div>
-            <div className="p-6 space-y-4">
+
+            {/* 점수 */}
+            <div className={`px-6 py-4 flex items-center gap-6 ${scoreBg(selected.security_score)}`}>
               <div className="text-center">
-                <p className={`text-4xl font-bold ${scoreColor(selected.security_score)}`}>
-                  {selected.security_score?.toFixed(0) ?? 0}점
+                <p className={`text-5xl font-black ${scoreColor(selected.security_score)}`}>
+                  {selected.security_score?.toFixed(0) ?? 0}
                 </p>
-                <p className="text-sm text-gray-500">보안 점수</p>
+                <p className="text-xs text-gray-500 mt-0.5">보안 점수</p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  ['💾 디스크 암호화', selected.disk_encrypted],
-                  ['🛡️ 백신 설치', selected.antivirus_installed],
-                  ['🔄 백신 업데이트', selected.antivirus_updated],
-                  ['📦 OS 패치', selected.os_patched],
-                  ['🚫 USB 차단', selected.usb_blocked],
-                  ['🔥 방화벽', selected.firewall_enabled],
-                  ['🔒 화면 잠금', selected.screen_lock_enabled],
-                ].map(([label, val]) => (
-                  <div key={label as string} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
-                    <span className="text-sm text-gray-600">{label as string}</span>
-                    <BooleanBadge value={val as boolean | null} trueLabel="적용" falseLabel="미적용" />
+              <div className={`text-4xl font-black ${scoreColor(selected.security_score)}`}>
+                {scoreGrade(selected.security_score)}등급
+              </div>
+              <div className="flex-1 text-sm text-gray-600">
+                {selected.security_score >= 80
+                  ? '✅ 보안 상태가 양호합니다.'
+                  : selected.security_score >= 60
+                  ? '⚠️ 일부 항목의 조치가 필요합니다. 아래 항목을 클릭하여 가이드를 확인하세요.'
+                  : '❌ 즉각적인 보안 조치가 필요합니다. 아래 빨간 항목을 먼저 처리하세요.'}
+              </div>
+            </div>
+
+            <div className="flex">
+              {/* 항목 목록 */}
+              <div className="w-64 border-r border-gray-100 p-3 space-y-1">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2 mb-2">보안 항목 — 클릭하여 가이드 확인</p>
+                {SECURITY_ITEMS.map(item => {
+                  const val = selected[item.key] as boolean | null
+                  const st = getItemStatus(val)
+                  const isActive = activeGuide?.key === item.key
+                  return (
+                    <button
+                      key={item.key}
+                      onClick={() => setActiveGuide(isActive ? null : item)}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-all
+                        ${isActive ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-gray-50 text-gray-700'}
+                      `}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">{item.icon}</span>
+                        <span className="text-sm font-medium">{item.label}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {st === 'pass' && <span className={`text-xs ${isActive ? 'text-green-200' : 'text-green-600'}`}>✓</span>}
+                        {st === 'fail' && <span className={`text-xs ${isActive ? 'text-red-200' : 'text-red-500'}`}>✗</span>}
+                        {st === 'unknown' && <span className={`text-xs ${isActive ? 'text-gray-300' : 'text-gray-400'}`}>?</span>}
+                        <ChevronRight className={`w-3.5 h-3.5 ${isActive ? 'text-white' : 'text-gray-300'}`} />
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* 가이드 패널 */}
+              <div className="flex-1 p-5">
+                {!activeGuide ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center text-gray-400 space-y-2 py-10">
+                    <Info className="w-10 h-10 text-gray-200" />
+                    <p className="font-medium text-gray-500">항목을 클릭하면</p>
+                    <p className="text-sm">상태별 조치 가이드가 표시됩니다</p>
+                    <div className="mt-4 text-xs space-y-1">
+                      <p><span className="text-green-600 font-bold">✓ 완료</span> — 통과 기준 및 유지 방법</p>
+                      <p><span className="text-red-500 font-bold">✗ 미완료</span> — 즉시 조치 단계별 가이드</p>
+                      <p><span className="text-gray-400 font-bold">? 미확인</span> — 직접 확인 방법 안내</p>
+                    </div>
                   </div>
-                ))}
+                ) : (() => {
+                  const val = selected[activeGuide.key] as boolean | null
+                  const st = getItemStatus(val)
+                  const guide = st === 'pass' ? activeGuide.passGuide
+                              : st === 'fail' ? activeGuide.failGuide
+                              : activeGuide.unknownGuide
+                  const headerColor = st === 'pass' ? 'bg-green-600' : st === 'fail' ? 'bg-red-600' : 'bg-gray-500'
+                  const headerLabel = st === 'pass' ? '✅ 통과 — 현재 상태 양호'
+                                    : st === 'fail' ? '❌ 미완료 — 즉시 조치 필요'
+                                    : '⚠️ 미확인 — 직접 확인 필요'
+                  return (
+                    <div className="space-y-3">
+                      <div className={`rounded-xl overflow-hidden`}>
+                        <div className={`px-4 py-2.5 ${headerColor} text-white text-sm font-semibold flex items-center justify-between`}>
+                          <span>{activeGuide.icon} {activeGuide.label}</span>
+                          <span className="text-xs font-normal opacity-80">{headerLabel}</span>
+                        </div>
+                        <div className="px-4 py-4 bg-gray-50 text-sm text-gray-700 whitespace-pre-line leading-relaxed">
+                          {guide}
+                        </div>
+                      </div>
+                      <div className="px-3 py-2 bg-blue-50 rounded-lg text-xs text-blue-600">
+                        📋 관련 규정: <span className="font-semibold">{activeGuide.regulation}</span>
+                      </div>
+                    </div>
+                  )
+                })()}
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* 에이전트 설치 안내 배너 */}
+      {/* 에이전트 안내 배너 */}
       {endpoints.length > 0 && endpoints.every(e => e.status === 'offline') && (
         <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-xl">
           <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
           <div className="flex-1">
             <p className="font-semibold text-blue-800 text-sm">사내 PC에 에이전트를 설치하세요</p>
             <p className="text-xs text-blue-600 mt-1">
-              PC에 에이전트를 설치하면 보안 상태(백신·암호화·패치·방화벽)가 자동으로 수집됩니다.
+              PC에 에이전트를 설치하면 보안 상태가 자동으로 수집됩니다.
             </p>
           </div>
-          <a
-            href="/api/v1/agent/download"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 flex-shrink-0"
-          >
+          <a href="/api/v1/agent/download"
+             className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 flex-shrink-0">
             <Download className="w-3.5 h-3.5" /> 에이전트 다운로드
           </a>
         </div>
       )}
 
-      {/* PC 등록 모달 */}
       {showAdd && <AddEndpointModal onClose={() => setShowAdd(false)} onSuccess={() => { setShowAdd(false); load() }} />}
     </div>
   )
