@@ -116,6 +116,17 @@ export default function Login({ onLogin }: Props) {
           </div>
         </div>
 
+        {/* 병원 신규 등록 링크 */}
+        <div className="text-center mt-4">
+          <a
+            href="/register"
+            className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 font-semibold hover:underline transition-colors"
+          >
+            🏥 병원 신규 등록 →
+          </a>
+          <p className="text-xs text-gray-400 mt-1">처음 이용하시나요? 30일 무료 체험으로 시작하세요</p>
+        </div>
+
         <p className="text-center text-xs text-gray-400 mt-4">
           © 2024 MediSafe Clinic. 의료정보보호 전문 플랫폼
         </p>

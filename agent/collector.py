@@ -227,10 +227,58 @@ def get_disk_usage() -> dict:
         "used_percent": disk.percent,
     }
 
+# ── EMR 프로세스 감지 ──────────────────────────────────────────────
+
+EMR_PROCESSES = {
+    '의사랑':    ['ubicare', 'ubiemc'],
+    '비트컴퓨터': ['bitcare', 'bitemc'],
+    '차트플러스': ['chartplus', 'cplus'],
+    '이지케어텍': ['ezcare', 'easycare'],
+    '유비케어':  ['ubicare2', 'ubicareemr'],
+    'BestCare':  ['bestcare', 'bestcarew'],
+}
+
+
+def detect_emr_processes() -> tuple[list[str], bool]:
+    """
+    실행 중인 프로세스에서 EMR 소프트웨어를 감지합니다.
+
+    Returns:
+        (emr_detected_list, emr_running)
+        emr_detected_list: 감지된 EMR 소프트웨어명 목록 (예: ['의사랑', '유비케어'])
+        emr_running: 하나 이상 감지되면 True
+    """
+    detected = []
+    try:
+        running_procs = set()
+        for proc in psutil.process_iter(['name', 'exe']):
+            try:
+                name = (proc.info.get('name') or '').lower()
+                exe = (proc.info.get('exe') or '').lower()
+                running_procs.add(name)
+                running_procs.add(exe)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+        for emr_name, keywords in EMR_PROCESSES.items():
+            for kw in keywords:
+                # 프로세스명 또는 실행파일 경로에 키워드 포함 여부 확인
+                if any(kw in proc for proc in running_procs if proc):
+                    if emr_name not in detected:
+                        detected.append(emr_name)
+                    break
+    except Exception as e:
+        print(f"  ⚠️ EMR 감지 오류: {e}")
+
+    return detected, len(detected) > 0
+
+
 def collect_all() -> dict:
     """전체 보안 정보 수집 (메인 함수)"""
     print(f"  🔍 정보 수집 중...")
-    
+
+    emr_detected, emr_running = detect_emr_processes()
+
     data = {
         "hostname": get_hostname(),
         "ip_address": get_ip_address(),
@@ -241,6 +289,8 @@ def collect_all() -> dict:
         "firewall_enabled": check_firewall(),
         "screen_lock_enabled": check_screen_lock(),
         "usb_devices": check_usb_devices(),
+        "emr_detected": emr_detected,   # 감지된 EMR 소프트웨어 목록
+        "emr_running": emr_running,     # EMR 실행 여부
         "system_metrics": {
             "cpu_usage": get_cpu_usage(),
             "memory": get_memory_usage(),
@@ -248,6 +298,7 @@ def collect_all() -> dict:
         },
         "collected_at": datetime.now().isoformat(),
     }
-    
-    print(f"  ✅ 수집 완료: {data['hostname']} ({data['ip_address']})")
+
+    emr_info = f" | EMR: {', '.join(emr_detected)}" if emr_detected else ""
+    print(f"  ✅ 수집 완료: {data['hostname']} ({data['ip_address']}){emr_info}")
     return data

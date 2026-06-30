@@ -58,6 +58,9 @@ class Endpoint(Base):
     firewall_enabled = Column(Boolean, nullable=True, comment="방화벽 활성화 여부")
     screen_lock_enabled = Column(Boolean, nullable=True, comment="화면 잠금 설정 여부")
 
+    # EMR 프로세스 감지 (에이전트 v1.1+)
+    emr_detected = Column(String(200), nullable=True, comment="감지된 EMR 소프트웨어 목록 (JSON 문자열)")
+
     # 보안 점수 (0-100)
     security_score = Column(Float, default=0.0, comment="현재 보안 점수")
     score_details = Column(JSON, nullable=True, comment="점수 세부 내역")

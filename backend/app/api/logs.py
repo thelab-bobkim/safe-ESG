@@ -113,6 +113,24 @@ async def create_log(
     db.add(log)
     db.commit()
     db.refresh(log)
+
+    # severity==critical이면 관리자에게 이메일 알림
+    if str(data.severity).lower() == "critical":
+        try:
+            import asyncio
+            from app.services.notification_service import send_security_alert
+            asyncio.create_task(send_security_alert(
+                tenant_id=current_user.tenant_id,
+                event_type="critical_log",
+                description=data.description or f"{data.event_type} 이벤트 발생",
+                severity="critical",
+                endpoint_hostname=data.endpoint_hostname or "알 수 없음",
+                db=db,
+            ))
+        except Exception as e:
+            import logging
+            logging.getLogger("medisafe").warning(f"[알림 태스크 오류] {e}")
+
     return _log_to_dict(log)
 
 

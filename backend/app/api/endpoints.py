@@ -43,6 +43,7 @@ class EndpointStatusUpdate(BaseModel):
     ip_address: Optional[str] = None
     pc_name: Optional[str] = None    # 설치 시 입력한 PC 표시명
     location: Optional[str] = None  # 설치 시 입력한 위치
+    emr_detected: Optional[str] = None  # 감지된 EMR 목록 (JSON 문자열)
 
 
 class USBEventReport(BaseModel):
@@ -298,6 +299,8 @@ async def agent_heartbeat(
         ep.hostname = data.pc_name.strip()
     if data.location and data.location.strip():
         ep.location = data.location.strip()
+    if data.emr_detected is not None:
+        ep.emr_detected = data.emr_detected
 
     # 보안 점수 재계산
     score_data = calculate_endpoint_score(ep)
@@ -305,6 +308,27 @@ async def agent_heartbeat(
     ep.score_details = score_data["details"]
 
     db.commit()
+
+    # 디스크 미암호화 + 백신 미설치 → critical 알림
+    if data.disk_encrypted is False and data.antivirus_installed is False:
+        try:
+            import asyncio
+            from app.services.notification_service import send_security_alert
+            asyncio.create_task(send_security_alert(
+                tenant_id=ep.tenant_id,
+                event_type="disk_antivirus_critical",
+                description=(
+                    f"PC '{ep.hostname}'에서 디스크 암호화 미설정 및 백신 미설치가 동시에 탐지되었습니다. "
+                    "즉각적인 보안 조치가 필요합니다."
+                ),
+                severity="critical",
+                endpoint_hostname=ep.hostname,
+                db=db,
+            ))
+        except Exception as e:
+            import logging
+            logging.getLogger("medisafe").warning(f"[알림 태스크 오류] {e}")
+
     return {"status": "ok", "score": score_data["total"]}
 
 
@@ -463,8 +487,140 @@ def _endpoint_to_dict(ep: Endpoint) -> dict:
         "usb_blocked": ep.usb_blocked,
         "firewall_enabled": ep.firewall_enabled,
         "screen_lock_enabled": ep.screen_lock_enabled,
+        "emr_detected": ep.emr_detected,
         "last_seen_at": ep.last_seen_at.isoformat() if ep.last_seen_at else None,
         "registered_at": ep.registered_at.isoformat() if ep.registered_at else None,
     }
 
 # 이 아래는 임시 디버그용 - 삭제 필요
+
+
+# ─────────────────────────────────────────────────────────────
+# F8: 취약점 원클릭 조치 스크립트 다운로드
+# ─────────────────────────────────────────────────────────────
+
+@router.get("/{endpoint_id}/remediation-script")
+async def get_remediation_script(
+    endpoint_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """해당 PC의 미충족 보안 항목을 자동 감지하고 PowerShell 조치 스크립트 생성."""
+    from fastapi.responses import Response
+
+    ep = _get_endpoint_or_404(db, endpoint_id, current_user.tenant_id)
+
+    lines = [
+        "# MediSafe Clinic - 보안 자동 조치 스크립트",
+        f"# PC: {ep.hostname} | 생성일: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC",
+        "# 주의: 관리자 권한으로 실행하세요 (PowerShell을 '관리자로 실행')",
+        "",
+        "Write-Host '=== MediSafe 보안 자동 조치 시작 ===' -ForegroundColor Cyan",
+        "",
+    ]
+
+    issues_found = False
+
+    if ep.disk_encrypted is False:
+        issues_found = True
+        lines += [
+            "# [1] 디스크 암호화 (BitLocker) 활성화",
+            "Write-Host '[1] BitLocker 암호화 활성화 중...' -ForegroundColor Yellow",
+            "try {",
+            "    $vol = Get-BitLockerVolume -MountPoint 'C:' -ErrorAction Stop",
+            "    if ($vol.ProtectionStatus -eq 'Off') {",
+            "        Enable-BitLocker -MountPoint 'C:' -EncryptionMethod Aes256 -UsedSpaceOnly -SkipHardwareTest",
+            "        Write-Host '  ✅ BitLocker 활성화 완료' -ForegroundColor Green",
+            "    } else {",
+            "        Write-Host '  ℹ️ BitLocker 이미 활성화됨' -ForegroundColor Gray",
+            "    }",
+            "} catch {",
+            "    Write-Host '  ⚠️ BitLocker 활성화 실패: ' $_.Exception.Message -ForegroundColor Red",
+            "}",
+            "",
+        ]
+
+    if ep.antivirus_installed is False:
+        issues_found = True
+        lines += [
+            "# [2] Windows Defender 실시간 보호 활성화",
+            "Write-Host '[2] Windows Defender 활성화 중...' -ForegroundColor Yellow",
+            "try {",
+            "    Set-MpPreference -DisableRealtimeMonitoring $false -DisableAntiSpyware $false",
+            "    Start-Service -Name WinDefend -ErrorAction SilentlyContinue",
+            "    Write-Host '  ✅ Windows Defender 활성화 완료' -ForegroundColor Green",
+            "} catch {",
+            "    Write-Host '  ⚠️ Defender 활성화 실패: ' $_.Exception.Message -ForegroundColor Red",
+            "}",
+            "",
+        ]
+
+    if ep.firewall_enabled is False:
+        issues_found = True
+        lines += [
+            "# [3] Windows 방화벽 활성화",
+            "Write-Host '[3] 방화벽 활성화 중...' -ForegroundColor Yellow",
+            "try {",
+            "    Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True",
+            "    Write-Host '  ✅ 방화벽 활성화 완료' -ForegroundColor Green",
+            "} catch {",
+            "    Write-Host '  ⚠️ 방화벽 활성화 실패: ' $_.Exception.Message -ForegroundColor Red",
+            "}",
+            "",
+        ]
+
+    if ep.screen_lock_enabled is False:
+        issues_found = True
+        lines += [
+            "# [4] 화면 잠금 설정 (유휴 10분 후 절전)",
+            "Write-Host '[4] 화면 잠금 설정 중...' -ForegroundColor Yellow",
+            "try {",
+            "    powercfg /change standby-timeout-ac 10",
+            "    powercfg /change standby-timeout-dc 5",
+            "    # 레지스트리로 화면보호기 잠금 활성화",
+            "    Set-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name ScreenSaverIsSecure -Value 1",
+            "    Set-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name ScreenSaveTimeOut -Value 600",
+            "    Set-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name ScreenSaveActive -Value 1",
+            "    Write-Host '  ✅ 화면 잠금 설정 완료' -ForegroundColor Green",
+            "} catch {",
+            "    Write-Host '  ⚠️ 화면 잠금 설정 실패: ' $_.Exception.Message -ForegroundColor Red",
+            "}",
+            "",
+        ]
+
+    if ep.os_patched is False:
+        issues_found = True
+        lines += [
+            "# [5] Windows Update 실행",
+            "Write-Host '[5] Windows Update 확인 중...' -ForegroundColor Yellow",
+            "try {",
+            "    Install-Module PSWindowsUpdate -Force -ErrorAction SilentlyContinue",
+            "    Import-Module PSWindowsUpdate -ErrorAction SilentlyContinue",
+            "    Get-WindowsUpdate -AcceptAll -Install -AutoReboot:$false -ErrorAction SilentlyContinue",
+            "    Write-Host '  ✅ 업데이트 확인 완료 (재시작이 필요할 수 있습니다)' -ForegroundColor Green",
+            "} catch {",
+            "    Write-Host '  ℹ️ Windows Update: 수동으로 설정 → Windows Update를 확인하세요' -ForegroundColor Gray",
+            "}",
+            "",
+        ]
+
+    if not issues_found:
+        lines += [
+            "Write-Host '✅ 모든 보안 항목이 이미 충족되어 있습니다.' -ForegroundColor Green",
+        ]
+
+    lines += [
+        "Write-Host '' ",
+        "Write-Host '=== MediSafe 보안 조치 완료 ===' -ForegroundColor Cyan",
+        "Write-Host 'MediSafe 대시보드에서 보안점수 변화를 확인하세요.' -ForegroundColor Gray",
+        "Read-Host '엔터를 누르면 종료합니다'",
+    ]
+
+    script_content = "\r\n".join(lines)
+    filename = f"MediSafe_Remediation_{ep.hostname}_{datetime.utcnow().strftime('%Y%m%d')}.ps1"
+
+    return Response(
+        content=script_content.encode("utf-8-sig"),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )

@@ -15,6 +15,8 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
+from typing import Optional
+import secrets
 
 from app.core.database import get_db
 from app.core.security import (
@@ -244,3 +246,140 @@ async def change_password(
     db.commit()
 
     return {"message": "비밀번호가 변경되었습니다."}
+
+
+# ──────────────────────────────────────────────
+# 셀프 온보딩 - 병원 신규 등록
+# ──────────────────────────────────────────────
+
+PLAN_MAX_ENDPOINTS = {
+    "basic": 5,
+    "standard": 20,
+    "pro": 100,
+}
+
+
+class RegisterHospitalRequest(BaseModel):
+    hospital_name: str
+    business_number: str
+    admin_name: str
+    admin_email: EmailStr
+    admin_password: str
+    phone: Optional[str] = None
+    plan: str = "standard"  # basic | standard | pro
+
+
+@router.post("/register-hospital", status_code=201)
+async def register_hospital(
+    data: RegisterHospitalRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    병원 셀프 온보딩 — 신규 병원 등록 (인증 불필요)
+    - 이메일/사업자번호 중복 체크
+    - Tenant + 관리자 User 생성
+    - 에이전트 등록 코드(enroll_code) 자동 발급
+    """
+    from app.models.tenant import Tenant, SubscriptionPlan, TenantStatus
+    from app.models.user import UserRole
+    from datetime import timedelta
+
+    # 플랜 검증
+    plan_lower = data.plan.lower()
+    if plan_lower not in PLAN_MAX_ENDPOINTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"올바르지 않은 플랜입니다. (basic / standard / pro 중 선택)"
+        )
+
+    # 이메일 중복 확인
+    existing_email = db.query(User).filter(
+        User.email == data.admin_email.lower()
+    ).first()
+    if existing_email:
+        raise HTTPException(
+            status_code=400,
+            detail="이미 등록된 이메일 주소입니다."
+        )
+
+    # 사업자번호 중복 확인
+    bn = data.business_number.strip()
+    existing_bn = db.query(Tenant).filter(
+        Tenant.business_number == bn
+    ).first()
+    if existing_bn:
+        raise HTTPException(
+            status_code=400,
+            detail="이미 등록된 사업자등록번호입니다."
+        )
+
+    # 비밀번호 강도 검증
+    ok, msg = validate_password_strength(data.admin_password)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+
+    # enroll_code 자동 생성 (형식: MSF-XXXXXX, 대문자+숫자 6자리)
+    def _generate_enroll_code() -> str:
+        while True:
+            code = "MSF-" + secrets.token_hex(3).upper()
+            exists = db.query(Tenant).filter(Tenant.enroll_code == code).first()
+            if not exists:
+                return code
+
+    enroll_code = _generate_enroll_code()
+
+    try:
+        # Tenant 생성
+        plan_enum_map = {
+            "basic": SubscriptionPlan.BASIC,
+            "standard": SubscriptionPlan.STANDARD,
+            "pro": SubscriptionPlan.PRO,
+        }
+        tenant = Tenant(
+            name=data.hospital_name.strip(),
+            business_number=bn,
+            phone=data.phone,
+            plan=plan_enum_map[plan_lower],
+            status=TenantStatus.TRIAL,
+            max_endpoints=PLAN_MAX_ENDPOINTS[plan_lower],
+            is_active=True,
+            enroll_code=enroll_code,
+            trial_ends_at=datetime.utcnow() + timedelta(days=30),
+        )
+        db.add(tenant)
+        db.flush()
+
+        # 관리자 User 생성
+        admin_user = User(
+            tenant_id=tenant.id,
+            email=data.admin_email.lower(),
+            hashed_password=hash_password(data.admin_password),
+            name=data.admin_name.strip(),
+            phone=data.phone,
+            role=UserRole.ADMIN,
+            is_active=True,
+            password_changed_at=datetime.utcnow(),
+            must_change_password=False,
+        )
+        db.add(admin_user)
+        db.commit()
+        db.refresh(tenant)
+
+        return {
+            "tenant_id": tenant.id,
+            "enroll_code": enroll_code,
+            "plan": plan_lower,
+            "max_endpoints": tenant.max_endpoints,
+            "trial_ends_at": tenant.trial_ends_at.isoformat() if tenant.trial_ends_at else None,
+            "message": (
+                f"'{data.hospital_name}' 병원이 성공적으로 등록되었습니다. "
+                f"에이전트 설치 시 등록 코드 '{enroll_code}'를 사용하세요."
+            ),
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"병원 등록 중 오류가 발생했습니다: {str(e)}"
+        )

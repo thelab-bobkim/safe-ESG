@@ -6,7 +6,7 @@ import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import {
   Shield, Monitor, FileText, ClipboardCheck,
   LogOut, Bell, ChevronRight, User, Activity,
-  Crown, Users
+  Crown, Users, CreditCard, Building2, FileSearch
 } from 'lucide-react'
 import type { UserInfo } from '../App'
 
@@ -21,6 +21,9 @@ const adminNavItems = [
   { to: '/endpoints', label: 'SafeEndpoint', icon: Monitor, exact: false, badge: null },
   { to: '/logs', label: 'SafeLog', icon: FileText, exact: false, badge: null },
   { to: '/compliance', label: 'SafeGuard', icon: ClipboardCheck, exact: false, badge: null },
+  { to: '/billing', label: '구독 관리', icon: CreditCard, exact: false, badge: null },
+  { to: '/groups', label: '그룹 관리', icon: Building2, exact: false, badge: null },
+  { to: '/pia', label: 'PIA 평가', icon: FileSearch, exact: false, badge: null },
 ]
 
 // 직원(staff) 메뉴
@@ -41,6 +44,9 @@ export default function Layout({ user, onLogout }: Props) {
       '/logs': 'SafeLog — 접속 기록',
       '/compliance': 'SafeGuard — 규제 점검',
       '/my-activity': '내 활동 기록',
+      '/billing': '구독 관리',
+      '/groups': '다중 지점 관리',
+      '/pia': 'PIA 개인정보 영향평가',
     }
     return titles[location.pathname] || 'MediSafe Clinic'
   }

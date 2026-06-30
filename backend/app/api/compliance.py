@@ -3,6 +3,7 @@ MediSafe Clinic - SafeGuard API
 규제 컴플라이언스 체크리스트 및 점검 결과를 관리합니다.
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, List
@@ -315,6 +316,34 @@ def _recalculate_scores(db, check: ComplianceCheck):
     check.na_count = sum(1 for r in results if r.status == CheckStatus.NA)
 
 
+@router.get("/checks/{check_id}/pdf")
+async def download_compliance_pdf(
+    check_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """점검 결과를 PDF 파일로 다운로드합니다."""
+    # 권한 확인 (tenant 격리)
+    check = _get_check_or_404(db, check_id, current_user.tenant_id)
+
+    from app.services.report_service import generate_compliance_pdf
+    try:
+        pdf_bytes = generate_compliance_pdf(check_id, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF 생성 오류: {str(e)}")
+
+    checked_at_str = (
+        check.checked_at.strftime("%Y%m%d") if check.checked_at else "unknown"
+    )
+    filename = f"medisafe_compliance_{check_id}_{checked_at_str}.pdf"
+
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 def _get_check_or_404(db, check_id, tenant_id):
     check = db.query(ComplianceCheck).filter(
         ComplianceCheck.id == check_id,
@@ -354,3 +383,411 @@ def _check_to_dict(check: ComplianceCheck) -> dict:
         "checked_at": check.checked_at.isoformat() if check.checked_at else None,
         "next_check_at": check.next_check_at.isoformat() if check.next_check_at else None,
     }
+
+
+# ─────────────────────────────────────────────────────────────
+# F10: 심평원 보안 지표 내보내기
+# ─────────────────────────────────────────────────────────────
+
+@router.get("/export/hira")
+async def export_hira(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """건강보험심사평가원 의료기관 정보보호 지표 CSV 내보내기."""
+    import io
+    import csv
+    from fastapi.responses import StreamingResponse as SR
+
+    from app.models.endpoint import Endpoint
+    from app.models.tenant import Tenant
+
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    endpoints = db.query(Endpoint).filter(
+        Endpoint.tenant_id == current_user.tenant_id,
+        Endpoint.is_active == True,
+    ).all()
+
+    total = len(endpoints)
+    def pct(count): return f"{round(count/max(total,1)*100)}%" if total > 0 else "N/A"
+    def yn(val): return "예" if val else "아니오"
+
+    enc_count = sum(1 for e in endpoints if e.disk_encrypted)
+    av_count  = sum(1 for e in endpoints if e.antivirus_installed)
+    fw_count  = sum(1 for e in endpoints if e.firewall_enabled)
+    sl_count  = sum(1 for e in endpoints if e.screen_lock_enabled)
+    pt_count  = sum(1 for e in endpoints if e.os_patched)
+
+    # 최신 컴플라이언스 점수
+    latest_check = db.query(ComplianceCheck).filter(
+        ComplianceCheck.tenant_id == current_user.tenant_id
+    ).order_by(ComplianceCheck.checked_at.desc()).first()
+
+    rows = [
+        ["항목코드", "보호지표", "현황", "세부내용", "비고"],
+        ["AC-01", "접근통제", "적용", f"MediSafe 역할기반 접근제어 적용 / 등록PC {total}대", "의료법 제23조"],
+        ["AC-02", "사용자인증", "적용", "JWT+비밀번호 정책(8자+3종조합+90일만료)", ""],
+        ["ENC-01", "암호화(저장)", pct(enc_count), f"BitLocker 암호화 {enc_count}/{total}대 적용", "개인정보보호법 제29조"],
+        ["AV-01", "악성코드 대응", pct(av_count), f"Defender/백신 설치 {av_count}/{total}대", ""],
+        ["FW-01", "네트워크 방화벽", pct(fw_count), f"방화벽 활성 {fw_count}/{total}대", ""],
+        ["BK-01", "백업", "적용", "MediSafe 서버 일 1회 자동 백업", ""],
+        ["SL-01", "화면잠금/세션관리", pct(sl_count), f"화면잠금 {sl_count}/{total}대 적용", ""],
+        ["PT-01", "패치관리", pct(pt_count), f"OS 최신 패치 {pt_count}/{total}대", ""],
+        ["LOG-01", "감사로그", "적용", "MediSafe SafeLog 자동 수집/WORM 보관", ""],
+        ["EDU-01", "보안교육", "미확인", "연 1회 이상 보안교육 실시 여부 직접 확인 필요", "권고"],
+        ["COMP-01", "컴플라이언스 종합점수", f"{round(latest_check.total_score,1) if latest_check else 'N/A'}점", "MediSafe SafeGuard 자동 점검 결과", ""],
+        ["INFO-01", "평가기관", tenant.name if tenant else "", f"생성일: {datetime.utcnow().strftime('%Y-%m-%d')}", "심평원 제출용"],
+    ]
+
+    output = io.StringIO()
+    output.write('\ufeff')  # UTF-8 BOM (Excel 호환)
+    writer = csv.writer(output)
+    writer.writerows(rows)
+    output.seek(0)
+
+    filename = f"HIRA_보안지표_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+    return SR(
+        iter([output.getvalue().encode("utf-8-sig")]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ─────────────────────────────────────────────────────────────
+# F11: 개인정보 영향평가(PIA) 보조
+# ─────────────────────────────────────────────────────────────
+
+@router.get("/pia-checklist")
+async def get_pia_checklist(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """개인정보 영향평가 체크리스트 및 현재 데이터 교차 분석."""
+    from app.models.endpoint import Endpoint
+
+    endpoints = db.query(Endpoint).filter(
+        Endpoint.tenant_id == current_user.tenant_id,
+        Endpoint.is_active == True,
+    ).all()
+    total = len(endpoints)
+    enc_pct = round(sum(1 for e in endpoints if e.disk_encrypted) / max(total, 1) * 100)
+    av_pct  = round(sum(1 for e in endpoints if e.antivirus_installed) / max(total, 1) * 100)
+    fw_pct  = round(sum(1 for e in endpoints if e.firewall_enabled) / max(total, 1) * 100)
+
+    checklist = [
+        {
+            "id": 1,
+            "category": "개인정보 처리 목적",
+            "item": "개인정보 처리 목적이 명확히 정의되어 있는가?",
+            "weight": 10,
+            "auto_status": None,
+            "guidance": "개인정보처리방침 및 내부 규정에 처리 목적을 명시하세요.",
+        },
+        {
+            "id": 2,
+            "category": "최소수집 원칙",
+            "item": "업무에 필요한 최소한의 개인정보만 수집하고 있는가?",
+            "weight": 10,
+            "auto_status": None,
+            "guidance": "불필요한 개인정보 항목 수집을 즉시 중단하세요.",
+        },
+        {
+            "id": 3,
+            "category": "접근통제",
+            "item": "개인정보에 대한 접근이 역할별로 통제되고 있는가?",
+            "weight": 15,
+            "auto_status": "적용" if total > 0 else "미확인",
+            "guidance": "MediSafe 역할기반 접근제어(원장/직원 분리) 적용 중.",
+        },
+        {
+            "id": 4,
+            "category": "암호화",
+            "item": "저장된 개인정보(환자 기록 포함)가 암호화되어 있는가?",
+            "weight": 15,
+            "auto_status": f"{enc_pct}% 적용" if total > 0 else "미확인",
+            "guidance": f"BitLocker 암호화 {enc_pct}% 적용 중. 미적용 PC 조치 필요.",
+        },
+        {
+            "id": 5,
+            "category": "악성코드 대응",
+            "item": "모든 PC에 백신이 설치되고 최신 상태로 유지되는가?",
+            "weight": 10,
+            "auto_status": f"{av_pct}% 적용" if total > 0 else "미확인",
+            "guidance": f"백신 설치율 {av_pct}%. 미설치 PC 즉시 조치 필요.",
+        },
+        {
+            "id": 6,
+            "category": "네트워크 보안",
+            "item": "방화벽이 모든 PC에 활성화되어 있는가?",
+            "weight": 10,
+            "auto_status": f"{fw_pct}% 적용" if total > 0 else "미확인",
+            "guidance": f"방화벽 활성화율 {fw_pct}%.",
+        },
+        {
+            "id": 7,
+            "category": "감사로그",
+            "item": "개인정보 접근 및 처리 기록이 보관되고 있는가?",
+            "weight": 10,
+            "auto_status": "적용",
+            "guidance": "MediSafe SafeLog WORM 기록 적용 중.",
+        },
+        {
+            "id": 8,
+            "category": "제3자 제공",
+            "item": "개인정보 제3자 제공 시 동의를 받고 있는가?",
+            "weight": 10,
+            "auto_status": None,
+            "guidance": "EMR 시스템 내 동의 관리 현황을 확인하세요.",
+        },
+        {
+            "id": 9,
+            "category": "보존 및 파기",
+            "item": "개인정보 보존기간이 정해지고 파기 절차가 있는가?",
+            "weight": 10,
+            "auto_status": None,
+            "guidance": "외래 5년, 입원 10년 보존 후 안전 파기 절차를 마련하세요.",
+        },
+        {
+            "id": 10,
+            "category": "보안교육",
+            "item": "개인정보 취급자에 대한 정기 보안교육이 실시되는가?",
+            "weight": 10,
+            "auto_status": None,
+            "guidance": "연 1회 이상 개인정보 보호 교육 실시 및 이수 기록 보관.",
+        },
+    ]
+
+    return {"checklist": checklist, "endpoint_count": total}
+
+
+class PIAReportRequest(BaseModel):
+    responses: Optional[dict] = None  # {item_id: "적용" | "미적용" | "부분적용"}
+
+
+@router.post("/pia-report")
+async def generate_pia_report(
+    data: PIAReportRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """PIA 보고서 초안 텍스트 생성."""
+    from app.models.tenant import Tenant
+    from app.models.endpoint import Endpoint
+
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    endpoints = db.query(Endpoint).filter(
+        Endpoint.tenant_id == current_user.tenant_id,
+        Endpoint.is_active == True,
+    ).all()
+    total = len(endpoints)
+    avg_score = sum(e.security_score or 0 for e in endpoints) / max(total, 1)
+
+    latest_check = db.query(ComplianceCheck).filter(
+        ComplianceCheck.tenant_id == current_user.tenant_id
+    ).order_by(ComplianceCheck.checked_at.desc()).first()
+
+    now = datetime.utcnow()
+    report_text = f"""
+개인정보 영향평가(PIA) 보고서 초안
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+■ 기관명: {tenant.name if tenant else ""}
+■ 평가일: {now.strftime('%Y년 %m월 %d일')}
+■ 담당자: MediSafe Clinic 자동 생성 (최종 검토 필요)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. 개요
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+본 기관은 「개인정보 보호법」 제33조에 따라 개인정보 영향평가를 실시하며,
+의료기관으로서 환자 개인정보(성명, 생년월일, 의무기록 등) 처리에 관한
+보안 현황을 점검합니다.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. 현황 요약
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+· 등록 PC 수: {total}대
+· 평균 보안점수: {avg_score:.1f}점
+· 컴플라이언스 점수: {f'{latest_check.total_score:.1f}점' if latest_check else '미점검'}
+· 암호화 적용: {sum(1 for e in endpoints if e.disk_encrypted)}/{total}대
+· 백신 설치: {sum(1 for e in endpoints if e.antivirus_installed)}/{total}대
+· 방화벽 활성: {sum(1 for e in endpoints if e.firewall_enabled)}/{total}대
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. 위험 요소 분석
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{'· 일부 PC 암호화 미적용 - 분실 시 환자 정보 유출 위험' if sum(1 for e in endpoints if not e.disk_encrypted) > 0 else '· 전 PC 암호화 적용 완료'}
+{'· 백신 미설치 PC 존재 - 악성코드 감염 위험' if sum(1 for e in endpoints if not e.antivirus_installed) > 0 else '· 전 PC 백신 설치 완료'}
+{'· 방화벽 미활성 PC 존재 - 네트워크 침입 위험' if sum(1 for e in endpoints if not e.firewall_enabled) > 0 else '· 전 PC 방화벽 활성화'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. 조치 계획
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+· 미암호화 PC: BitLocker 즉시 활성화 (30일 이내)
+· 백신 미설치: Windows Defender 활성화 (1주일 이내)
+· 방화벽 미활성: 방화벽 정책 적용 (1주일 이내)
+· 정기 보안교육: 연 1회 이상 실시
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. 서명
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+기관장: __________________ (인)
+개인정보 보호책임자: __________________ (인)
+평가일: {now.strftime('%Y년 %m월 %d일')}
+
+※ 이 보고서는 MediSafe Clinic에서 자동 생성된 초안입니다.
+   제출 전 개인정보 보호책임자(CPO)의 검토 및 서명이 필요합니다.
+"""
+
+    return {
+        "report_text": report_text,
+        "tenant_name": tenant.name if tenant else "",
+        "generated_at": now.isoformat(),
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# F12: 의료기관 정보보호 등급 자동 계산
+# ─────────────────────────────────────────────────────────────
+
+@router.get("/security-grade")
+async def get_security_grade(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """1~5등급 자동 계산 및 향상 로드맵 반환."""
+    from app.models.endpoint import Endpoint
+
+    endpoints = db.query(Endpoint).filter(
+        Endpoint.tenant_id == current_user.tenant_id,
+        Endpoint.is_active == True,
+    ).all()
+    total = len(endpoints)
+
+    # 최신 컴플라이언스 점수
+    latest_check = db.query(ComplianceCheck).filter(
+        ComplianceCheck.tenant_id == current_user.tenant_id
+    ).order_by(ComplianceCheck.checked_at.desc()).first()
+
+    # 종합점수: 컴플라이언스 50% + 엔드포인트 보안 50%
+    compliance_score = latest_check.total_score if latest_check else 50.0
+    ep_avg = sum(e.security_score or 0 for e in endpoints) / max(total, 1) if total else 50.0
+    total_score = compliance_score * 0.5 + ep_avg * 0.5
+
+    # 등급 계산
+    if total_score >= 90:
+        grade = 5
+        grade_name = "5등급 (최우수)"
+        grade_color = "#16a34a"
+    elif total_score >= 80:
+        grade = 4
+        grade_name = "4등급 (우수)"
+        grade_color = "#2563eb"
+    elif total_score >= 70:
+        grade = 3
+        grade_name = "3등급 (보통)"
+        grade_color = "#d97706"
+    elif total_score >= 60:
+        grade = 2
+        grade_name = "2등급 (미흡)"
+        grade_color = "#ea580c"
+    else:
+        grade = 1
+        grade_name = "1등급 (취약)"
+        grade_color = "#dc2626"
+
+    # 조치 목록
+    actions = []
+    unencrypted = [e.hostname for e in endpoints if not e.disk_encrypted]
+    no_av = [e.hostname for e in endpoints if not e.antivirus_installed]
+    no_fw = [e.hostname for e in endpoints if not e.firewall_enabled]
+    no_sl = [e.hostname for e in endpoints if not e.screen_lock_enabled]
+    not_patched = [e.hostname for e in endpoints if not e.os_patched]
+
+    if unencrypted:
+        actions.append({"priority": "높음", "action": f"BitLocker 암호화 활성화", "targets": unencrypted, "score_impact": "+15점"})
+    if no_av:
+        actions.append({"priority": "높음", "action": "백신(Defender) 설치/활성화", "targets": no_av, "score_impact": "+10점"})
+    if no_fw:
+        actions.append({"priority": "중간", "action": "방화벽 활성화", "targets": no_fw, "score_impact": "+10점"})
+    if no_sl:
+        actions.append({"priority": "중간", "action": "화면잠금 설정", "targets": no_sl, "score_impact": "+8점"})
+    if not_patched:
+        actions.append({"priority": "중간", "action": "OS 패치 적용", "targets": not_patched, "score_impact": "+7점"})
+    if not latest_check:
+        actions.append({"priority": "높음", "action": "컴플라이언스 점검 실시", "targets": [], "score_impact": "+20점"})
+
+    return {
+        "grade": grade,
+        "grade_name": grade_name,
+        "grade_color": grade_color,
+        "total_score": round(total_score, 1),
+        "compliance_score": round(compliance_score, 1),
+        "endpoint_score": round(ep_avg, 1),
+        "next_grade": grade + 1 if grade < 5 else 5,
+        "next_grade_threshold": [0, 60, 70, 80, 90][min(grade, 4)],
+        "score_to_next": max(0, round([0, 60, 70, 80, 90][min(grade, 4)] - total_score, 1)),
+        "actions": actions,
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# F8 헬퍼용 엔드포인트 데이터 접근 (endpoints.py에 추가하기 위한 함수)
+# ─────────────────────────────────────────────────────────────
+
+def _seed_compliance(db, tenant_id: int):
+    """초기 컴플라이언스 항목 시드 데이터 삽입."""
+    from app.models.compliance import ComplianceItem, RegulationType
+
+    # 이미 있으면 스킵
+    if db.query(ComplianceItem).count() > 0:
+        return
+
+    items = [
+        # 개인정보보호법 제29조
+        ComplianceItem(regulation=RegulationType.PRIVACY_ACT_29, item_code="PA29-01",
+            title="접근 권한 관리", description="개인정보 접근 권한을 역할별로 차등 부여", is_mandatory=True, weight=15, order_num=1,
+            guidance="MediSafe 관리자/직원 역할 분리 적용"),
+        ComplianceItem(regulation=RegulationType.PRIVACY_ACT_29, item_code="PA29-02",
+            title="접근 통제", description="방화벽 및 네트워크 접근 통제", is_mandatory=True, weight=15, order_num=2,
+            guidance="에이전트 방화벽 상태 자동 점검"),
+        ComplianceItem(regulation=RegulationType.PRIVACY_ACT_29, item_code="PA29-03",
+            title="접속 기록 보관", description="개인정보 시스템 접속 기록 보관 (최소 6개월)", is_mandatory=True, weight=15, order_num=3,
+            guidance="MediSafe SafeLog WORM 기록"),
+        ComplianceItem(regulation=RegulationType.PRIVACY_ACT_29, item_code="PA29-04",
+            title="개인정보 암호화", description="저장 개인정보 암호화 (BitLocker 등)", is_mandatory=True, weight=15, order_num=4,
+            guidance="에이전트 BitLocker 상태 자동 점검"),
+        ComplianceItem(regulation=RegulationType.PRIVACY_ACT_29, item_code="PA29-05",
+            title="악성프로그램 방지", description="백신 프로그램 설치 및 주기적 갱신", is_mandatory=True, weight=10, order_num=5,
+            guidance="에이전트 Defender 상태 자동 점검"),
+        ComplianceItem(regulation=RegulationType.PRIVACY_ACT_29, item_code="PA29-06",
+            title="물리적 보안", description="화면잠금, USB 보안", is_mandatory=False, weight=10, order_num=6,
+            guidance="에이전트 화면잠금 상태 자동 점검"),
+        # 의료법 제23조
+        ComplianceItem(regulation=RegulationType.MEDICAL_ACT_23, item_code="MA23-01",
+            title="EMR 인증", description="보건복지부 인증 EMR 사용", is_mandatory=True, weight=20, order_num=7,
+            guidance="EMR 벤더 인증서 확인 필요"),
+        ComplianceItem(regulation=RegulationType.MEDICAL_ACT_23, item_code="MA23-02",
+            title="전자서명", description="전자의무기록 전자서명 적용", is_mandatory=True, weight=15, order_num=8,
+            guidance="EMR 시스템 설정 확인"),
+        ComplianceItem(regulation=RegulationType.MEDICAL_ACT_23, item_code="MA23-03",
+            title="접속 기록", description="EMR 접속 기록 보관", is_mandatory=True, weight=15, order_num=9,
+            guidance="MediSafe SafeLog 자동 기록"),
+        ComplianceItem(regulation=RegulationType.MEDICAL_ACT_23, item_code="MA23-04",
+            title="의무기록 보존", description="외래 5년·입원 10년 보존", is_mandatory=True, weight=15, order_num=10,
+            guidance="EMR 시스템 보존 기간 설정 확인"),
+        # EMR 인증 기준
+        ComplianceItem(regulation=RegulationType.EMR_CERT, item_code="EMR-01",
+            title="EMR 인증 번호", description="공인 EMR 인증 번호 보유", is_mandatory=True, weight=25, order_num=11,
+            guidance="EMR 벤더에 인증서 요청"),
+        ComplianceItem(regulation=RegulationType.EMR_CERT, item_code="EMR-02",
+            title="자동 백업", description="EMR 데이터 자동 백업 설정", is_mandatory=True, weight=25, order_num=12,
+            guidance="EMR 관리자 화면에서 백업 설정 확인"),
+        ComplianceItem(regulation=RegulationType.EMR_CERT, item_code="EMR-03",
+            title="세션 타임아웃", description="비활동 세션 자동 종료", is_mandatory=False, weight=25, order_num=13,
+            guidance="EMR 세션 타임아웃 10분 이하 설정 권장"),
+        ComplianceItem(regulation=RegulationType.EMR_CERT, item_code="EMR-04",
+            title="비밀번호 정책", description="복잡성·만료 정책 적용", is_mandatory=True, weight=25, order_num=14,
+            guidance="MediSafe 비밀번호 정책 자동 적용"),
+    ]
+    for item in items:
+        db.add(item)

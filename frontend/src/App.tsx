@@ -5,6 +5,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import Login from './pages/Login'
+import Register from './pages/Register'
 import Layout from './pages/Layout'
 import AdminDashboard from './pages/AdminDashboard'
 import StaffDashboard from './pages/StaffDashboard'
@@ -12,6 +13,9 @@ import Endpoints from './pages/Endpoints'
 import Logs from './pages/Logs'
 import Compliance from './pages/Compliance'
 import MyActivity from './pages/MyActivity'
+import Billing from './pages/Billing'
+import GroupDashboard from './pages/GroupDashboard'
+import PIA from './pages/PIA'
 import { authApi } from './api/client'
 
 export interface UserInfo {
@@ -69,6 +73,10 @@ function App() {
           element={user ? <Navigate to="/" replace /> : <Login onLogin={setUser} />}
         />
         <Route
+          path="/register"
+          element={user ? <Navigate to="/" replace /> : <Register />}
+        />
+        <Route
           path="/"
           element={
             user ? (
@@ -101,6 +109,20 @@ function App() {
 
           {/* 직원(staff)용 본인 활동 내역 */}
           <Route path="my-activity" element={<MyActivity />} />
+
+          {/* Phase 2 & 3 기능 */}
+          <Route
+            path="billing"
+            element={isAdmin ? <Billing /> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="groups"
+            element={isAdmin ? <GroupDashboard /> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="pia"
+            element={isAdmin ? <PIA /> : <Navigate to="/" replace />}
+          />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

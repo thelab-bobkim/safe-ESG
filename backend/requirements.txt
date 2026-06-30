@@ -27,6 +27,12 @@ pydantic[email]             # 이메일 형식 검증
 # ── 캐시/세션 ──
 redis==5.1.1
 
+# ── PDF 보고서 ──
+reportlab==4.2.5
+
+# ── 이메일 알림 ──
+aiosmtplib==3.0.1
+
 # ── 유틸 ──
 python-dotenv==1.0.1
 python-dateutil==2.9.0

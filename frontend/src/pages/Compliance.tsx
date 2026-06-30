@@ -3,7 +3,7 @@
  * 규제 컴플라이언스 체크리스트 및 점검 관리
  */
 import { useState, useEffect } from 'react'
-import { ClipboardCheck, Play, CheckCircle, XCircle, AlertTriangle, Minus, Info, ChevronDown, ChevronUp, Monitor } from 'lucide-react'
+import { ClipboardCheck, Play, CheckCircle, XCircle, AlertTriangle, Minus, Info, ChevronDown, ChevronUp, Monitor, FileDown } from 'lucide-react'
 import { complianceApi, endpointApi } from '../api/client'
 
 interface Check {
@@ -40,6 +40,7 @@ export default function Compliance() {
   const [results, setResults] = useState<CheckResult[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set())
   const [editingStatus, setEditingStatus] = useState<Record<number, string>>({})
   const [endpoints, setEndpoints] = useState<{id:number; hostname:string; location:string|null; status:string}[]>([])
@@ -102,6 +103,35 @@ export default function Compliance() {
       alert(err.response?.data?.detail || '점검 생성 실패')
     } finally {
       setCreating(false)
+    }
+  }
+
+  const handleDownloadPdf = async () => {
+    if (!activeCheck) return
+    setDownloadingPdf(true)
+    try {
+      const token = localStorage.getItem('access_token')
+      const res = await fetch(`/api/v1/compliance/checks/${activeCheck.id}/pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        alert('PDF 생성 실패: ' + (err.detail || res.statusText))
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `medisafe_compliance_${activeCheck.id}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      alert('PDF 다운로드 실패: ' + err.message)
+    } finally {
+      setDownloadingPdf(false)
     }
   }
 
@@ -169,6 +199,19 @@ export default function Compliance() {
               {creating ? '생성 중...' : '새 점검 시작'}
             </button>
           </div>
+          {activeCheck && (
+            <div className="flex flex-col">
+              <label className="text-xs text-gray-500 mb-0.5 pl-1">&nbsp;</label>
+              <button
+                onClick={handleDownloadPdf}
+                disabled={downloadingPdf}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                <FileDown className="w-4 h-4" />
+                {downloadingPdf ? 'PDF 생성 중...' : 'PDF 다운로드'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

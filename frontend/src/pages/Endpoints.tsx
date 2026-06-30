@@ -11,7 +11,22 @@ interface Endpoint {
   location: string; status: string; security_score: number; disk_encrypted: boolean | null
   antivirus_installed: boolean | null; antivirus_updated: boolean | null; os_patched: boolean | null
   usb_blocked: boolean | null; firewall_enabled: boolean | null; screen_lock_enabled: boolean | null
+  emr_detected: string | null
   last_seen_at: string | null; registered_at: string | null
+}
+
+function getEmrLabel(emrDetected: string | null): { label: string; detected: boolean; names: string[] } {
+  if (!emrDetected) return { label: '미감지', detected: false, names: [] }
+  try {
+    const parsed = JSON.parse(emrDetected)
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return { label: `감지됨 (${parsed.join(', ')})`, detected: true, names: parsed }
+    }
+  } catch {}
+  if (typeof emrDetected === 'string' && emrDetected.trim() && emrDetected !== '[]') {
+    return { label: emrDetected, detected: true, names: [emrDetected] }
+  }
+  return { label: '미감지', detected: false, names: [] }
 }
 
 // ── 보안 항목별 가이드 정의 ─────────────────────────────────────────────
@@ -271,7 +286,7 @@ export default function Endpoints() {
         <table className="w-full">
           <thead className="bg-gray-50 border-b border-gray-100">
             <tr>
-              {['PC명','위치','OS','상태','보안점수','디스크 암호화','백신','패치','마지막 접속'].map(h => (
+              {['PC명','위치','OS','상태','보안점수','디스크 암호화','백신','패치','EMR 감지','마지막 접속'].map(h => (
                 <th key={h} className="text-left text-xs font-medium text-gray-500 px-4 py-3">{h}</th>
               ))}
             </tr>
@@ -283,6 +298,7 @@ export default function Endpoints() {
               <tr><td colSpan={9} className="text-center py-8 text-gray-400">등록된 PC가 없습니다</td></tr>
             ) : endpoints.map(ep => {
               const statusCfg = STATUS_CONFIG[ep.status] || STATUS_CONFIG.offline
+              const emrInfo = getEmrLabel(ep.emr_detected)
               return (
                 <tr key={ep.id} className="hover:bg-blue-50/30 cursor-pointer transition-colors"
                     onClick={() => { setSelected(ep); setActiveGuide(null) }}>
@@ -312,6 +328,17 @@ export default function Endpoints() {
                   <td className="px-4 py-3"><StatusBadge value={ep.disk_encrypted} /></td>
                   <td className="px-4 py-3"><StatusBadge value={ep.antivirus_installed} /></td>
                   <td className="px-4 py-3"><StatusBadge value={ep.os_patched} /></td>
+                  <td className="px-4 py-3">
+                    {emrInfo.detected ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                        🏥 감지됨
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+                        미감지
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-xs text-gray-400">
                     {ep.last_seen_at
                       ? new Date(ep.last_seen_at).toLocaleString('ko-KR',
@@ -355,12 +382,27 @@ export default function Endpoints() {
               <div className={`text-4xl font-black ${scoreColor(selected.security_score)}`}>
                 {scoreGrade(selected.security_score)}등급
               </div>
-              <div className="flex-1 text-sm text-gray-600">
-                {selected.security_score >= 80
-                  ? '✅ 보안 상태가 양호합니다.'
-                  : selected.security_score >= 60
-                  ? '⚠️ 일부 항목의 조치가 필요합니다. 아래 항목을 클릭하여 가이드를 확인하세요.'
-                  : '❌ 즉각적인 보안 조치가 필요합니다. 아래 빨간 항목을 먼저 처리하세요.'}
+              <div className="flex-1 text-sm text-gray-600 space-y-1">
+                <div>
+                  {selected.security_score >= 80
+                    ? '✅ 보안 상태가 양호합니다.'
+                    : selected.security_score >= 60
+                    ? '⚠️ 일부 항목의 조치가 필요합니다. 아래 항목을 클릭하여 가이드를 확인하세요.'
+                    : '❌ 즉각적인 보안 조치가 필요합니다. 아래 빨간 항목을 먼저 처리하세요.'}
+                </div>
+                {/* EMR 감지 배지 */}
+                {(() => {
+                  const emr = getEmrLabel(selected.emr_detected)
+                  return emr.detected ? (
+                    <div className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-purple-100 text-purple-700 text-xs font-medium">
+                      🏥 EMR 감지됨: {emr.names.join(', ')}
+                    </div>
+                  ) : (
+                    <div className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-100 text-gray-500 text-xs">
+                      EMR: 미감지
+                    </div>
+                  )
+                })()}
               </div>
             </div>
 

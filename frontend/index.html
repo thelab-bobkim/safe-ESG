@@ -6,9 +6,31 @@
     <title>MediSafe Clinic - 의료보안 플랫폼</title>
     <meta name="description" content="소형 병·의원을 위한 의료정보보호 SaaS 플랫폼" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <!-- PWA (F7) -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#1e40af" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="MediSafe" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="MediSafe Clinic" />
+    <!-- Open Graph -->
+    <meta property="og:title" content="MediSafe Clinic" />
+    <meta property="og:description" content="소형 병·의원용 의료정보보호 SaaS" />
+    <meta property="og:type" content="website" />
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Service Worker 등록 (F7 PWA)
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(err => {
+            console.warn('SW 등록 실패:', err)
+          })
+        })
+      }
+    </script>
   </body>
 </html>

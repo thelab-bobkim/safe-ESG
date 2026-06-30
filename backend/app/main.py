@@ -28,7 +28,7 @@ from app.core.rate_limit import limiter
 from app.core.security import hash_password, generate_agent_token
 
 # 라우터 등록
-from app.api import auth, endpoints, logs, compliance, dashboard
+from app.api import auth, endpoints, logs, compliance, dashboard, billing, groups
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("medisafe")
@@ -196,10 +196,41 @@ async def seed_initial_data():
 async def lifespan(app: FastAPI):
     """서버 시작/종료 수명주기"""
     import app.models  # noqa
+    import app.models.hospital_group  # noqa - F9 모델 등록
     Base.metadata.create_all(bind=engine)
     await seed_initial_data()
-    logger.info(f"🏥 MediSafe Clinic Ver-1 시작 ({settings.APP_VERSION})")
+
+    # ── APScheduler: 주간 보안 리포트 자동 발송 (F6) ──
+    scheduler = None
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        from app.services.weekly_report_service import send_all_weekly_reports
+
+        scheduler = AsyncIOScheduler(timezone="Asia/Seoul")
+        scheduler.add_job(
+            lambda: send_all_weekly_reports(SessionLocal),
+            CronTrigger(day_of_week="mon", hour=9, minute=0, timezone="Asia/Seoul"),
+            id="weekly_security_report",
+            name="주간 보안 리포트 발송",
+            replace_existing=True,
+        )
+        scheduler.start()
+        logger.info("✅ APScheduler 시작: 매주 월요일 09:00 KST 주간 리포트 발송")
+    except ImportError:
+        logger.warning("⚠️ apscheduler 미설치 - 주간 리포트 스케줄러 비활성. pip install apscheduler")
+    except Exception as e:
+        logger.warning(f"⚠️ APScheduler 시작 실패 (서버는 정상 운영): {e}")
+
+    logger.info(f"🏥 MediSafe Clinic Ver-2 시작 ({settings.APP_VERSION})")
     yield
+
+    # 종료 시 스케줄러 정리
+    if scheduler:
+        try:
+            scheduler.shutdown(wait=False)
+        except Exception:
+            pass
     logger.info("MediSafe Clinic 서버 종료")
 
 
@@ -333,6 +364,8 @@ app.include_router(endpoints.router,  prefix="/api/v1")
 app.include_router(logs.router,       prefix="/api/v1")
 app.include_router(compliance.router, prefix="/api/v1")
 app.include_router(dashboard.router,  prefix="/api/v1")
+app.include_router(billing.router,    prefix="/api/v1")   # F5 결제/구독
+app.include_router(groups.router,     prefix="/api/v1")   # F9 다중지점
 
 
 # ──────────────────────────────────────────────
