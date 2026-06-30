@@ -218,33 +218,43 @@ export default function Compliance() {
                           </div>
 
                           {isExpanded && (
-                            <div className="px-4 pb-3 space-y-2 border-t border-gray-100 bg-white">
-                              {item.evidence && item.evidence.includes('에이전트 자동 수집') && (
-                                <div className="p-2 bg-purple-50 rounded text-xs text-purple-700 flex items-center gap-1">
-                                  <span>🤖</span>
-                                  <span><span className="font-medium">자동 수집: </span>{item.evidence}</span>
+                            <div className="px-4 pb-4 space-y-3 border-t border-gray-100 bg-white">
+                              {/* 자동 수집 배지 */}
+                              {item.evidence && (item.evidence.includes('에이전트 자동') || item.evidence.includes('MediSafe') || item.evidence.includes('SafeLog')) && (
+                                <div className="flex items-start gap-2 p-2 bg-purple-50 rounded-lg text-xs text-purple-700">
+                                  <span className="text-base leading-none">🤖</span>
+                                  <span><span className="font-semibold">자동 판정: </span>{item.evidence}</span>
                                 </div>
                               )}
-                              {item.evidence && item.evidence.includes('SafeLog') && (
-                                <div className="p-2 bg-purple-50 rounded text-xs text-purple-700 flex items-center gap-1">
-                                  <span>🤖</span>
-                                  <span><span className="font-medium">자동 수집: </span>{item.evidence}</span>
-                                </div>
-                              )}
+                              {/* 상세 가이드 */}
                               {item.guidance && (
-                                <div className="p-2 bg-blue-50 rounded text-xs text-blue-700">
-                                  <span className="font-medium">💡 이행 방법: </span>{item.guidance}
+                                <div className="rounded-lg border border-blue-100 overflow-hidden">
+                                  <div className="px-3 py-2 bg-blue-600 text-white text-xs font-semibold flex items-center gap-1">
+                                    <span>📋</span>
+                                    <span>
+                                      {currentStatus === 'fail' ? '❌ 미충족 — 조치 방법' :
+                                       currentStatus === 'partial' ? '⚠️ 부분충족 — 개선 방법' :
+                                       currentStatus === 'pass' ? '✅ 통과 기준 및 증빙' :
+                                       '💡 이행 가이드'}
+                                    </span>
+                                  </div>
+                                  <div className="px-3 py-3 bg-blue-50 text-xs text-gray-700 whitespace-pre-line leading-relaxed">
+                                    {item.guidance}
+                                  </div>
+                                </div>
+                              )}
+                              {/* 직접 입력 증빙 */}
+                              {item.evidence && !item.evidence.includes('에이전트') && !item.evidence.includes('MediSafe') && !item.evidence.includes('SafeLog') && (
+                                <div className="flex items-start gap-2 p-2 bg-green-50 rounded text-xs text-green-700">
+                                  <span>📎</span>
+                                  <span><span className="font-semibold">증빙: </span>{item.evidence}</span>
                                 </div>
                               )}
                               {item.note && (
-                                <p className="text-xs text-gray-600">
-                                  <span className="font-medium">메모: </span>{item.note}
-                                </p>
-                              )}
-                              {item.evidence && !item.evidence.includes('에이전트') && !item.evidence.includes('SafeLog') && (
-                                <p className="text-xs text-green-700">
-                                  <span className="font-medium">증빙: </span>{item.evidence}
-                                </p>
+                                <div className="flex items-start gap-2 p-2 bg-gray-50 rounded text-xs text-gray-600">
+                                  <span>📝</span>
+                                  <span><span className="font-semibold">메모: </span>{item.note}</span>
+                                </div>
                               )}
                             </div>
                           )}
