@@ -292,9 +292,12 @@ async def agent_heartbeat(
     if data.screen_lock_enabled is not None: ep.screen_lock_enabled = data.screen_lock_enabled
     if data.agent_version: ep.agent_version = data.agent_version
     if data.ip_address: ep.ip_address = data.ip_address
-    # PC명/위치 업데이트 (설치 마법사에서 입력한 값이 heartbeat로 전달됨)
-    if getattr(data, 'pc_name', None): ep.hostname = data.pc_name
-    if getattr(data, 'location', None): ep.location = data.location
+    # PC명/위치 업데이트 — pc_name이 실제로 전달된 경우에만 덮어씀
+    # (구버전 에이전트는 pc_name을 안 보내므로 기존 hostname 유지)
+    if data.pc_name and data.pc_name.strip():
+        ep.hostname = data.pc_name.strip()
+    if data.location and data.location.strip():
+        ep.location = data.location.strip()
 
     # 보안 점수 재계산
     score_data = calculate_endpoint_score(ep)

@@ -2,7 +2,7 @@
 MediSafe Clinic - SafeGuard API
 규제 컴플라이언스 체크리스트 및 점검 결과를 관리합니다.
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, List
@@ -55,7 +55,7 @@ async def list_checks(
 
 @router.post("/checks", status_code=201)
 async def create_check(
-    endpoint_id: Optional[int] = None,
+    endpoint_id: Optional[int] = Query(None, description="특정 PC ID (미지정 시 전체 평균)"),
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
