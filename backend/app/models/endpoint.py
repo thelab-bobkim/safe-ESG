@@ -38,9 +38,14 @@ class Endpoint(Base):
     os_version = Column(String(100), nullable=True, comment="운영체제 버전")
     location = Column(String(100), nullable=True, comment="위치 (예: 진료실 1)")
 
-    # 에이전트 정보
-    agent_version = Column(String(20), nullable=True, comment="설치된 에이전트 버전")
-    agent_token = Column(String(100), unique=True, nullable=True, comment="에이전트 인증 토큰")
+    # 에이전트 정보 (Ver-1: 토큰 폐기 지원)
+    agent_version       = Column(String(20), nullable=True, comment="설치된 에이전트 버전")
+    agent_token         = Column(String(100), unique=True, nullable=True,
+                                 comment="에이전트 인증 토큰 (msa_ 접두사)")
+    agent_token_revoked = Column(Boolean, default=False,
+                                 comment="토큰 폐기 여부 (PC 분실/도난 시 즉시 폐기)")
+    agent_token_issued_at = Column(DateTime, nullable=True,
+                                   comment="토큰 발급일 (1년 후 갱신 권고)")
     status = Column(Enum(EndpointStatus), default=EndpointStatus.OFFLINE)
     last_seen_at = Column(DateTime, nullable=True, comment="마지막 온라인 시간")
 

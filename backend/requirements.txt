@@ -1,15 +1,32 @@
-fastapi==0.111.0
-uvicorn[standard]==0.29.0
-sqlalchemy==2.0.30
-alembic==1.13.1
-psycopg2-binary==2.9.9
-redis==5.0.4
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-multipart==0.0.9
-pydantic==2.7.1
-pydantic-settings==2.2.1
+# MediSafe Clinic Ver-1 - 백엔드 의존성
+# 개인정보보호법 제29조 준수 보안 라이브러리 포함
+
+# ── 웹 프레임워크 ──
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# ── 데이터베이스 ──
+sqlalchemy==2.0.35
+psycopg2-binary==2.9.9    # PostgreSQL 드라이버
+alembic==1.13.3            # DB 마이그레이션
+
+# ── 인증/보안 ──
+python-jose[cryptography]==3.3.0  # JWT
+argon2-cffi==23.1.0               # Argon2id 비밀번호 해시 (NIST SP 800-63B)
+cryptography==43.0.1              # 암호화 기반 라이브러리
+
+# ── API 보안 ──
+slowapi==0.1.9              # Rate Limiting
+python-multipart==0.0.12   # Form 데이터
+
+# ── 입력 검증 ──
+pydantic==2.9.2
+pydantic-settings==2.5.2
+pydantic[email]             # 이메일 형식 검증
+
+# ── 캐시/세션 ──
+redis==5.1.1
+
+# ── 유틸 ──
 python-dotenv==1.0.1
-httpx==0.27.0
-reportlab==4.2.0
-pandas==2.2.2
+python-dateutil==2.9.0
