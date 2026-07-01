@@ -2,7 +2,7 @@
 MediSafe Clinic - 테넌트(병원) 모델
 각 병원이 하나의 테넌트를 구성합니다. 모든 데이터는 tenant_id로 완전 격리됩니다.
 """
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import enum
@@ -49,6 +49,14 @@ class Tenant(Base):
 
     # 에이전트 자동 등록 코드 (병원별 고유 코드, 설치 시 입력)
     enroll_code = Column(String(20), unique=True, nullable=True, comment="에이전트 등록 코드")
+
+    # F5: 결제/구독 추가 컬럼
+    plan_expires_at = Column(DateTime, nullable=True, comment="플랜 만료일 (구독 시 설정)")
+    payment_method = Column(String(50), nullable=True, comment="결제 수단 (card, etc)")
+    toss_customer_key = Column(String(100), nullable=True, comment="토스페이먼츠 고객 키")
+
+    # F9: 다중 지점 그룹 FK
+    group_id = Column(Integer, nullable=True, comment="소속 병원 그룹 ID")
 
     # 타임스탬프
     created_at = Column(DateTime, server_default=func.now())

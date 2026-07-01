@@ -93,3 +93,7 @@ export const complianceApi = {
 }
 
 export default api
+
+// Named export for convenience (F5, F9, F12 features)
+export const apiClient = api
+

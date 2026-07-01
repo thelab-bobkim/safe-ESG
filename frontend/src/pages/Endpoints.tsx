@@ -379,6 +379,32 @@ export default function Endpoints() {
                 </p>
                 <p className="text-xs text-gray-500 mt-0.5">보안 점수</p>
               </div>
+              {/* 조치 스크립트 다운로드 버튼 (F8) */}
+              {selected.security_score < 100 && (
+                <a
+                  href={`/api/v1/endpoints/${selected.id}/remediation-script`}
+                  download
+                  onClick={e => {
+                    const token = localStorage.getItem('access_token')
+                    if (!token) { e.preventDefault(); return }
+                    // fetch로 다운로드 (인증 헤더 필요)
+                    e.preventDefault()
+                    fetch(`/api/v1/endpoints/${selected.id}/remediation-script`, {
+                      headers: { Authorization: `Bearer ${token}` }
+                    }).then(res => res.blob()).then(blob => {
+                      const url = URL.createObjectURL(blob)
+                      const a = document.createElement('a')
+                      a.href = url
+                      a.download = `MediSafe_Remediation_${selected.hostname}.ps1`
+                      a.click()
+                      URL.revokeObjectURL(url)
+                    })
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-600 text-white rounded-lg text-xs font-semibold hover:bg-orange-700 transition-colors flex-shrink-0"
+                >
+                  📥 조치 스크립트 다운로드
+                </a>
+              )}
               <div className={`text-4xl font-black ${scoreColor(selected.security_score)}`}>
                 {scoreGrade(selected.security_score)}등급
               </div>

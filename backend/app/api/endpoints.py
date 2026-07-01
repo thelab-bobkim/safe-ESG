@@ -617,10 +617,14 @@ async def get_remediation_script(
     ]
 
     script_content = "\r\n".join(lines)
-    filename = f"MediSafe_Remediation_{ep.hostname}_{datetime.utcnow().strftime('%Y%m%d')}.ps1"
+    from urllib.parse import quote
+    safe_hostname = ep.hostname.encode('ascii', errors='ignore').decode() or f"endpoint_{ep.id}"
+    filename_ascii = f"MediSafe_Remediation_{safe_hostname}_{datetime.utcnow().strftime('%Y%m%d')}.ps1"
+    filename_encoded = quote(f"MediSafe_조치스크립트_{ep.hostname}_{datetime.utcnow().strftime('%Y%m%d')}.ps1")
+    filename = filename_ascii
 
     return Response(
         content=script_content.encode("utf-8-sig"),
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
+        headers={"Content-Disposition": f"attachment; filename={filename_ascii}; filename*=UTF-8''{filename_encoded}"},
     )

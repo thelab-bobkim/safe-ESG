@@ -445,11 +445,14 @@ async def export_hira(
     writer.writerows(rows)
     output.seek(0)
 
-    filename = f"HIRA_보안지표_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+    date_str = datetime.utcnow().strftime('%Y%m%d')
+    from urllib.parse import quote
+    filename_ascii = f"HIRA_Security_{date_str}.csv"
+    filename_encoded = quote(f"HIRA_보안지표_{date_str}.csv")
     return SR(
         iter([output.getvalue().encode("utf-8-sig")]),
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
+        headers={"Content-Disposition": f"attachment; filename={filename_ascii}; filename*=UTF-8''{filename_encoded}"},
     )
 
 
@@ -720,12 +723,14 @@ async def get_security_grade(
         "grade": grade,
         "grade_name": grade_name,
         "grade_color": grade_color,
+        "current_score": round(total_score, 1),   # 프론트 호환 필드
         "total_score": round(total_score, 1),
         "compliance_score": round(compliance_score, 1),
         "endpoint_score": round(ep_avg, 1),
         "next_grade": grade + 1 if grade < 5 else 5,
         "next_grade_threshold": [0, 60, 70, 80, 90][min(grade, 4)],
         "score_to_next": max(0, round([0, 60, 70, 80, 90][min(grade, 4)] - total_score, 1)),
+        "total_endpoints": total,
         "actions": actions,
     }
 

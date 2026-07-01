@@ -4,8 +4,8 @@
  * staff 계정은 이 화면에 접근할 수 없습니다.
  */
 import { useState, useEffect } from 'react'
-import { Shield, Monitor, FileText, ClipboardCheck, AlertTriangle, CheckCircle, XCircle, Clock, TrendingUp } from 'lucide-react'
-import { dashboardApi } from '../api/client'
+import { Shield, Monitor, FileText, ClipboardCheck, AlertTriangle, CheckCircle, XCircle, Clock, TrendingUp, Star } from 'lucide-react'
+import { dashboardApi, apiClient } from '../api/client'
 import { RadialBarChart, RadialBar, ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts'
 
 interface DashboardData {
@@ -51,15 +51,32 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   policy_change: '정책 변경', admin_action: '관리자 행위', security_alert: '보안 경고',
 }
 
+interface SecurityGrade {
+  grade: number
+  grade_name: string
+  grade_color: string
+  total_score: number
+  next_grade: number
+  next_grade_threshold: number
+  score_to_next: number
+  actions: Array<{ priority: string; action: string; targets: string[]; score_impact: string }>
+}
+
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [gradeData, setGradeData] = useState<SecurityGrade | null>(null)
+  const [showGradeModal, setShowGradeModal] = useState(false)
 
   useEffect(() => {
     dashboardApi.getSummary()
       .then(res => setData(res.data))
       .catch(console.error)
       .finally(() => setLoading(false))
+    // 보안 등급 로드 (F12)
+    apiClient.get('/compliance/security-grade')
+      .then(res => setGradeData(res.data))
+      .catch(() => {})
   }, [])
 
   if (loading) return <LoadingState />
@@ -227,6 +244,93 @@ export default function Dashboard() {
           </p>
         )}
       </div>
+
+      {/* 보안 등급 뱃지 (F12) */}
+      {gradeData && (
+        <div
+          className="card cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => setShowGradeModal(true)}
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold text-gray-800 mb-1">의료기관 정보보호 등급</h3>
+              <div className="flex items-center gap-2">
+                <span className="text-2xl font-bold" style={{ color: gradeData.grade_color }}>
+                  {gradeData.grade_name}
+                </span>
+                <div className="flex gap-0.5">
+                  {[1,2,3,4,5].map(i => (
+                    <Star
+                      key={i}
+                      className="w-5 h-5"
+                      fill={i <= gradeData.grade ? gradeData.grade_color : '#e5e7eb'}
+                      color={i <= gradeData.grade ? gradeData.grade_color : '#e5e7eb'}
+                    />
+                  ))}
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                종합점수 {gradeData.total_score}점
+                {gradeData.score_to_next > 0 && ` · ${gradeData.next_grade}등급까지 +${gradeData.score_to_next}점`}
+              </p>
+            </div>
+            <div className="text-sm text-blue-600">
+              등급 향상 로드맵 →
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 보안 등급 로드맵 모달 (F12) */}
+      {showGradeModal && gradeData && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowGradeModal(false)}>
+          <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900">등급 향상 로드맵</h3>
+              <button onClick={() => setShowGradeModal(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+            </div>
+            <div className="flex items-center gap-3 mb-4 p-3 rounded-xl" style={{ backgroundColor: gradeData.grade_color + '15' }}>
+              <div className="flex gap-0.5">
+                {[1,2,3,4,5].map(i => (
+                  <Star key={i} className="w-5 h-5" fill={i <= gradeData.grade ? gradeData.grade_color : '#e5e7eb'} color={i <= gradeData.grade ? gradeData.grade_color : '#e5e7eb'} />
+                ))}
+              </div>
+              <div>
+                <p className="font-bold" style={{ color: gradeData.grade_color }}>{gradeData.grade_name}</p>
+                <p className="text-sm text-gray-500">종합점수 {gradeData.total_score}점</p>
+              </div>
+            </div>
+            {gradeData.actions.length > 0 ? (
+              <div className="space-y-3">
+                <p className="text-sm font-semibold text-gray-700">조치 필요 항목:</p>
+                {gradeData.actions.map((action, i) => (
+                  <div key={i} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold flex-shrink-0 ${
+                      action.priority === '높음' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'
+                    }`}>
+                      {action.priority}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800">{action.action}</p>
+                      {action.targets.length > 0 && (
+                        <p className="text-xs text-gray-500 mt-0.5 truncate">
+                          대상: {action.targets.join(', ')}
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-xs font-bold text-green-600 flex-shrink-0">{action.score_impact}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-green-600">
+                <CheckCircle className="w-5 h-5" />
+                <p className="text-sm font-medium">모든 보안 항목이 충족되었습니다!</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

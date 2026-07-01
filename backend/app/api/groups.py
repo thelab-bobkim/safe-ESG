@@ -49,6 +49,26 @@ async def create_group(
     }
 
 
+@router.get("/")
+async def list_groups(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """내가 속한 그룹 목록 조회."""
+    groups = db.query(HospitalGroup).filter(
+        HospitalGroup.owner_tenant_id == current_user.tenant_id
+    ).all()
+    return [
+        {
+            "id": g.id,
+            "name": g.name,
+            "owner_tenant_id": g.owner_tenant_id,
+            "created_at": g.created_at.isoformat(),
+        }
+        for g in groups
+    ]
+
+
 @router.get("/{group_id}/tenants")
 async def list_group_tenants(
     group_id: int,

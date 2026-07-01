@@ -3,8 +3,8 @@
  * 규제 컴플라이언스 체크리스트 및 점검 관리
  */
 import { useState, useEffect } from 'react'
-import { ClipboardCheck, Play, CheckCircle, XCircle, AlertTriangle, Minus, Info, ChevronDown, ChevronUp, Monitor, FileDown } from 'lucide-react'
-import { complianceApi, endpointApi } from '../api/client'
+import { ClipboardCheck, Play, CheckCircle, XCircle, AlertTriangle, Minus, Info, ChevronDown, ChevronUp, Monitor, FileDown, Download } from 'lucide-react'
+import { complianceApi, endpointApi, apiClient } from '../api/client'
 
 interface Check {
   id: number; title: string; total_score: number; privacy_score: number
@@ -212,6 +212,34 @@ export default function Compliance() {
               </button>
             </div>
           )}
+          {/* 심평원 내보내기 버튼 (F10) */}
+          <div className="flex flex-col">
+            <label className="text-xs text-gray-500 mb-0.5 pl-1">&nbsp;</label>
+            <button
+              onClick={async () => {
+                try {
+                  const token = localStorage.getItem('access_token')
+                  const res = await fetch('/api/v1/compliance/export/hira', {
+                    headers: { Authorization: `Bearer ${token}` }
+                  })
+                  if (!res.ok) throw new Error('서버 오류')
+                  const blob = await res.blob()
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `HIRA_보안지표_${new Date().toISOString().slice(0,10)}.csv`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                } catch (err) {
+                  alert('내보내기 실패')
+                }
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              심평원 제출용 내보내기
+            </button>
+          </div>
         </div>
       </div>
 
